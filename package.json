@@ -1,0 +1,30 @@
+{
+  "name": "taco-online",
+  "version": "1.0.0",
+  "description": "Taco (bete-ombro) multiplayer 2x2 no navegador, com bonecos personalizáveis.",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "taco",
+    "bete-ombro",
+    "bets",
+    "multiplayer",
+    "threejs",
+    "websocket"
+  ],
+  "author": "Jesiel Pfeifer",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "three": "^0.160.0",
+    "ws": "^8.18.0"
+  }
+}

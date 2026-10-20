@@ -1,0 +1,8 @@
+services:
+  taco:
+    build: .
+    image: ghcr.io/jesielpfeifer/taco-online:latest
+    container_name: taco-online
+    ports:
+      - "${TACO_PORT:-3000}:3000"
+    restart: unless-stopped

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Taco Online — Bete-Ombro</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏏</text></svg>" />
+    <link rel="stylesheet" href="/css/style.css" />
+    <script type="importmap">
+      { "imports": { "three": "/vendor/three/three.module.js" } }
+    </script>
+  </head>
+  <body>
+    <!-- ============ MENU ============ -->
+    <section id="menu" class="screen active">
+      <header class="brand">
+        <h1>TACO <span>online</span></h1>
+        <p>Bete-ombro · bets · tacobol — 2 contra 2 no navegador</p>
+      </header>
+      <div class="menu-grid">
+        <div class="panel">
+          <h2>Seu boneco</h2>
+          <label class="field">Nome <input id="name" maxlength="16" placeholder="Seu nome" /></label>
+          <div class="preview-wrap">
+            <canvas id="preview" width="300" height="360"></canvas>
+            <div class="preview-actions">
+              <button id="randomAvatar" class="ghost">🎲 Aleatório</button>
+            </div>
+          </div>
+          <div id="customizer" class="customizer"></div>
+        </div>
+        <div class="panel">
+          <h2>Jogar</h2>
+          <button id="createRoom" class="primary big">Criar sala</button>
+          <div class="join-row">
+            <input id="joinCode" maxlength="4" placeholder="CÓDIGO" />
+            <button id="joinRoom">Entrar</button>
+          </div>
+          <h3>Salas abertas</h3>
+          <ul id="roomList" class="room-list"><li class="muted">Nenhuma sala ainda</li></ul>
+          <details class="howto">
+            <summary>Como jogar</summary>
+            <div id="helpMenu"></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ LOBBY ============ -->
+    <section id="lobby" class="screen">
+      <div class="lobby-head">
+        <button id="leaveLobby" class="ghost">← Sair</button>
+        <h2>Sala <span id="roomCode" class="code"></span></h2>
+        <button id="copyLink" class="ghost">Copiar link</button>
+      </div>
+      <div class="lobby-grid">
+        <div class="panel">
+          <h3>Duplas</h3>
+          <div id="seats" class="seats"></div>
+          <p class="muted small">Clique numa vaga para sentar. Vagas vazias viram bots ao iniciar.</p>
+          <h3>Espectadores</h3>
+          <div id="spectators" class="muted small">—</div>
+          <button id="startGame" class="primary big">Começar partida</button>
+          <p id="hostHint" class="muted small"></p>
+        </div>
+        <div class="panel">
+          <h3>Regras (o anfitrião escolhe)</h3>
+          <div id="rules" class="rules"></div>
+          <h3>Skin da bolinha</h3>
+          <div id="ballSkins" class="ball-skins"></div>
+        </div>
+        <div class="panel chat-panel">
+          <h3>Conversa</h3>
+          <div id="lobbyChat" class="chat-log"></div>
+          <input id="lobbyChatInput" maxlength="140" placeholder="Digite e Enter" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ GAME ============ -->
+    <section id="game" class="screen">
+      <div id="viewport"></div>
+      <div id="hud">
+        <div id="scoreboard"></div>
+        <div id="status"></div>
+        <div id="banner"></div>
+        <div id="feed"></div>
+        <div id="roleHint"></div>
+        <div id="power"><div id="powerFill"></div></div>
+        <div id="stamina"><div id="staminaFill"></div></div>
+        <div id="keys"></div>
+        <div id="gameChat">
+          <div id="gameChatLog" class="chat-log"></div>
+          <input id="gameChatInput" maxlength="140" placeholder="Enter para conversar" />
+        </div>
+      </div>
+      <div id="decide" class="modal hidden"></div>
+      <div id="pauseBox" class="modal hidden"></div>
+      <div id="overBox" class="modal hidden"></div>
+      <div id="helpBox" class="modal hidden"><div class="modal-card wide"><div id="helpGame"></div><button class="primary" data-close-help>Fechar (H)</button></div></div>
+    </section>
+
+    <div id="toast"></div>
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>
