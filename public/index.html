@@ -63,8 +63,12 @@
           <button id="copyLink" class="ghost">Copiar link</button>
         </div>
       </div>
-      <div class="lobby-grid">
+      <div id="stepper" class="stepper"></div>
+      <div id="stepMap" class="step-wrap"></div>
+      <div id="stepMode" class="step-wrap"></div>
+      <div id="stepRules" class="lobby-grid">
         <div class="panel">
+          <div id="setupSummary" class="setup-summary"></div>
           <h3>Duplas</h3>
           <div id="seats" class="seats"></div>
           <p class="muted small">Clique numa vaga para sentar. Vagas vazias viram bots ao iniciar.</p>
@@ -105,6 +109,7 @@
         <div id="crosshair"></div>
         <div id="lockHint">Clique no campo para controlar a câmera com o mouse · <kbd>Esc</kbd> solta o mouse</div>
         <div id="voiceHud" class="voice-box"></div>
+        <button id="menuBtn" title="Menu (Esc)">☰ Menu</button>
         <div id="gameChat">
           <div id="gameChatLog" class="chat-log"></div>
           <input id="gameChatInput" maxlength="140" placeholder="Enter para conversar" />
@@ -113,6 +118,21 @@
       <div id="decide" class="modal hidden"></div>
       <div id="pauseBox" class="modal hidden"></div>
       <div id="overBox" class="modal hidden"></div>
+      <div id="gameMenu" class="modal hidden">
+        <div class="modal-card">
+          <h2>Menu da partida</h2>
+          <button class="primary big" data-menu="resume">▶ Continuar jogando</button>
+          <details class="settings" open>
+            <summary>⚙️ Ajustes de câmera e mouse</summary>
+            <div id="settingsPanel"></div>
+          </details>
+          <button class="big" data-menu="surrender">🏳️ Pedir rendição</button>
+          <p class="muted small">Seu time entrega o jogo e o adversário vence. Se o parceiro for humano, ele precisa aceitar. Quem se rende não ganha moedas.</p>
+          <button class="big" data-menu="leave">🚪 Sair da partida (um bot assume meu lugar)</button>
+          <p class="muted small">A partida continua normalmente para os outros jogadores.</p>
+        </div>
+      </div>
+      <div id="surrenderBox" class="modal hidden"></div>
       <div id="helpBox" class="modal hidden"><div class="modal-card wide"><div id="helpGame"></div><button class="primary" data-close-help>Fechar (H)</button></div></div>
     </section>
 

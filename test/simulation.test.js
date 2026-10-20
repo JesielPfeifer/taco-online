@@ -80,3 +80,39 @@ test('três pra trás perde o taco e ponto desconta os pra trás', () => {
   room.addParaTras();
   assert.ok(room.pendingLose);
 });
+
+test('bola no corpo durante o giro é lancha, não rebatida; no taco é rebatida', () => {
+  const { room } = playMatch({ startMethod: 'aleatorio', lanchaRule: 'tres' }, 0);
+  room.phase = 'playing';
+  const batter = room.batters()[1]; // at base 1, facing base 0 (rot = PI)
+  const pitch = (x, z) => {
+    const b = room.ball;
+    Object.assign(b, { holder: null, x, y: 0.9, z, vx: 0, vy: 0, vz: -15, restT: 0, lanchaDone: false });
+    b.lastTouch = { kind: 'pitch', by: room.fielders()[0].id, team: 1 - room.battingTeam, targetBase: 1, t: room.time };
+  };
+  // Ball straight into the body while the bat is still on the batter's right side.
+  batter.swingT = 0.06;
+  batter.swingHit = false;
+  pitch(batter.x, batter.z - 0.2);
+  room.stepBall(1 / 240);
+  assert.equal(room.lancha, 1, 'contou lancha');
+  assert.notEqual(room.ball.lastTouch.kind, 'hit');
+  // Ball in front of the batter exactly where the bat passes (sweet spot): a real hit.
+  room.lancha = 0;
+  batter.swingT = 0.185;
+  batter.swingHit = false;
+  batter.rot = Math.PI;
+  pitch(batter.x, batter.z - 0.9);
+  room.stepBall(1 / 240);
+  assert.equal(room.ball.lastTouch.kind, 'hit');
+  assert.equal(room.lancha, 0);
+});
+
+test('rendição: sem parceiro humano encerra na hora e o outro time vence', () => {
+  const { room } = playMatch({ startMethod: 'aleatorio' }, 0);
+  room.phase = 'playing';
+  const p = room.batters()[0];
+  room.requestSurrender(p.id);
+  assert.equal(room.phase, 'gameover');
+  assert.equal(room.winner, 1 - p.team);
+});

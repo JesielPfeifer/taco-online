@@ -837,3 +837,192 @@ kbd {
 .podium .p3 {
   order: 3;
 }
+
+#menuBtn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  pointer-events: auto;
+  background: rgba(10, 16, 12, 0.8);
+}
+#feed {
+  top: 56px;
+}
+#surrenderBox {
+  align-items: flex-start;
+  padding-top: 18vh;
+  background: transparent;
+  pointer-events: none;
+}
+#surrenderBox .modal-card {
+  pointer-events: auto;
+  border: 2px solid var(--accent);
+}
+
+.sens {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  margin: 8px 0 0;
+}
+.sens input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.settings {
+  text-align: left;
+  margin: 8px 0;
+  background: var(--panel2);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.settings summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+  font-size: 0.9rem;
+}
+/* Coin-flip of "molhado ou seco": fixed, clipped stage so the spinning bat never
+   changes the card's size (no scrollbar flicker). */
+.flip-stage {
+  width: 96px;
+  height: 96px;
+  margin: 8px auto;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  perspective: 300px;
+}
+.flip-bat {
+  display: block;
+  font-size: 3rem;
+  line-height: 1;
+  animation: flip 0.5s linear infinite;
+  will-change: transform;
+}
+@keyframes flip {
+  from {
+    transform: rotateX(0deg) translateY(0);
+  }
+  50% {
+    transform: rotateX(180deg) translateY(-6px);
+  }
+  to {
+    transform: rotateX(360deg) translateY(0);
+  }
+}
+#decide .modal-card {
+  overflow-x: hidden;
+}
+
+/* room setup wizard */
+.center {
+  text-align: center;
+}
+.stepper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 16px 12px;
+}
+.step-pill {
+  border-radius: 999px;
+  padding: 6px 14px;
+}
+.step-pill.on {
+  background: var(--accent);
+  color: #1b1b1b;
+  font-weight: 800;
+  opacity: 1;
+}
+.step-pill.done {
+  border-color: var(--ok);
+}
+.step-pill:disabled {
+  cursor: default;
+}
+.step-sep {
+  color: var(--mute);
+}
+.step-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 16px 24px;
+}
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.map-grid.modes {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 320px));
+  justify-content: center;
+}
+.map-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  text-align: left;
+  border: 3px solid transparent;
+  background: var(--panel);
+  transition: transform 0.12s, border-color 0.12s;
+}
+.map-card:not(:disabled):hover {
+  transform: translateY(-3px);
+  border-color: #6b8f73;
+}
+.map-card.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(255, 210, 63, 0.25);
+}
+.map-card:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.map-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #0d150f;
+}
+.map-card b {
+  font-size: 1.05rem;
+}
+.map-card span {
+  font-size: 0.82rem;
+  color: var(--mute);
+}
+.mode-card {
+  align-items: center;
+  text-align: center;
+  padding: 22px 14px;
+}
+.map-card .mode-icon {
+  font-size: 3.4rem;
+  color: inherit !important;
+}
+.setup-summary {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: var(--panel2);
+  border-radius: 10px;
+  padding: 6px;
+  margin-bottom: 12px;
+}
+.setup-summary img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+}

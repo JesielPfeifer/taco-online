@@ -54,7 +54,8 @@ export class Lobby {
     });
     ws.on('close', () => {
       if (client.room) client.room.leave(client.id, true);
-      this.clients.delete(client.id);
+      // A reconnecting client may have taken over this id already.
+      if (this.clients.get(client.id) === client) this.clients.delete(client.id);
       this.broadcastRooms();
     });
   }

@@ -26,6 +26,19 @@ const BOT_NAMES = ['Zeca', 'Tião', 'Juju', 'Dona Cida', 'Biel', 'Neném', 'Bia'
 // Rolling friction per scenario ground: asphalt rolls far, sand stops the ball fast.
 const ROLL_FRICTION = { campinho: 2.6, rua: 1.7, sitio: 3.2, mercado: 1.6, praia: 5.5 };
 
+// Swing geometry (seconds since the click / metres / radians).
+const SWING_START = 0.05;
+const SWING_END = 0.32;
+const BODY_R = 0.38;
+const BAT_NEAR = 0.42;
+const BAT_FAR = 1.4;
+const BAT_HALF_WIDTH = 0.5;
+// Bat direction relative to where the batter faces: +1.5 rad (right) -> 0 (front) -> -1.5 (left).
+export function batAngle(swingT) {
+  const f = (swingT - SWING_START) / (SWING_END - SWING_START);
+  return 1.5 - Math.max(0, Math.min(1, f)) * 3;
+}
+
 const r2 = (v) => Math.round(v * 100) / 100;
 const hyp = (x, z) => Math.sqrt(x * x + z * z);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -43,6 +56,9 @@ export class Room {
     this.rules = { ...DEFAULT_RULES };
     this.ballSkin = 'tenis';
     this.phase = 'lobby';
+    // Room setup wizard driven by the host: 1 = map, 2 = single match or championship, 3 = rules & players.
+    this.setupStep = 1;
+    this.mode = 'single';
     this.time = 0;
     this.frame = 0;
     this.events = [];
@@ -94,6 +110,8 @@ export class Room {
         pub: m.pub || null,
         powers: m.powers || [],
       })),
+      setupStep: this.setupStep,
+      mode: this.champ ? 'champ' : this.mode,
       teamLabels: this.teamLabels || null,
       teamColors: this.teamColors || null,
       champ: this.champView(),
@@ -106,6 +124,14 @@ export class Room {
   }
 
   join(client) {
+    clearTimeout(this.emptyTimer);
+    this.emptyTimer = null;
+    // Same player coming back (F5, dropped connection, or left and changed their mind):
+    // give them their seat in the match back instead of making them a spectator.
+    if (this.players && client.pub) {
+      const m = [...this.members.values()].find((x) => x.pub === client.pub && this.players.has(x.id));
+      if (m && (!m.client || m.client.ws.readyState !== 1)) return this.reclaim(client, m);
+    }
     if (this.humans().length >= 12) return client.send({ t: 'err', msg: 'Sala cheia' });
     this.members.set(client.id, {
       id: client.id,
@@ -124,6 +150,24 @@ export class Room {
     }
     this.broadcastRoom();
     this.chatSystem(`${client.name} entrou na sala`);
+  }
+
+  reclaim(client, m) {
+    if (m.client) m.client.room = null; // stale socket that has not closed yet
+    // The returning client takes over the member id, so seats, the ball holder and
+    // every other reference to this player stay valid.
+    this.lobby.clients.delete(client.id);
+    client.id = m.id;
+    this.lobby.clients.set(m.id, client);
+    client.room = this;
+    Object.assign(m, { client, bot: false, name: client.name, avatar: client.avatar, powers: this.lobby.powers?.(client) || [] });
+    const p = this.players.get(m.id);
+    Object.assign(p, { bot: false, dead: false, discAt: null, lastActive: this.time, ai: {}, name: client.name });
+    p.input = { mx: 0, mz: 0, ax: p.input.ax, az: p.input.az, sp: false };
+    if (!this.hostId || !this.members.get(this.hostId)?.client) this.hostId = m.id;
+    client.send({ t: 'welcome', id: m.id });
+    this.ev({ k: 'msg', text: `${m.name} voltou para o jogo!` });
+    this.broadcastRoom();
   }
 
   firstFreeSeat() {
@@ -145,18 +189,31 @@ export class Room {
     m.voice = false;
     const p = this.players?.get(id);
     if (this.phase !== 'lobby' && p) {
-      // Keep the seat in the match: the avatar becomes "bete morto" and a bot takes over shortly.
       m.client = null;
-      p.dead = true;
-      p.discAt = this.time;
-      this.ev({ k: 'msg', text: `${m.name} saiu${disconnected ? ' (caiu a conexão)' : ''}. Bete morto até um bot assumir.` });
+      if (disconnected) {
+        // Dropped connection: bete morto for a few seconds, then a bot takes over.
+        p.dead = true;
+        p.discAt = this.time;
+        this.ev({ k: 'msg', text: `${m.name} caiu da conexão. Bete morto até um bot assumir.` });
+      } else {
+        // Left on purpose: a bot takes the seat right away.
+        p.bot = true;
+        p.dead = false;
+        p.discAt = null;
+        m.bot = true;
+        this.ev({ k: 'msg', text: `${m.name} saiu da partida. Um bot assumiu o lugar.` });
+      }
+      if (this.surrender?.team === p.team) this.surrender = null;
     } else {
       this.members.delete(id);
       for (const t of [0, 1]) for (const s of [0, 1]) if (this.seats[t][s] === id) this.seats[t][s] = null;
     }
     if (this.hostId === id) this.hostId = this.humans()[0]?.id || null;
     if (!this.humans().length) {
-      this.lobby.removeRoom(this);
+      // Keep the room around for a minute so a reload (F5) can rejoin it.
+      clearTimeout(this.emptyTimer);
+      this.emptyTimer = setTimeout(() => !this.humans().length && this.lobby.removeRoom(this), 60000);
+      this.emptyTimer.unref?.();
       return;
     }
     this.broadcastRoom();
@@ -232,6 +289,13 @@ export class Room {
         if (!ownsBall(msg.skin, this.lobby.owned?.(client) || [])) return client.send({ t: 'err', msg: 'Compre essa bolinha na loja primeiro' });
         this.ballSkin = msg.skin;
         return this.broadcastRoom();
+      case 'setup': {
+        if (!host || this.phase !== 'lobby' || this.champ) return;
+        if ([1, 2, 3].includes(msg.step)) this.setupStep = msg.step;
+        if (msg.mode === 'single' || msg.mode === 'champ') this.mode = msg.mode;
+        if (typeof msg.scenario === 'string') this.rules = sanitizeRules({ ...this.rules, scenario: msg.scenario });
+        return this.broadcastRoom();
+      }
       case 'champStart':
         if (!host || this.phase !== 'lobby') return;
         return this.champStart(msg.teamIds);
@@ -244,6 +308,10 @@ export class Room {
         this.teamLabels = this.teamColors = null;
         if (this.phase === 'gameover') return this.backToLobby();
         return this.broadcastRoom();
+      case 'surrender':
+        return this.requestSurrender(client.id);
+      case 'surrenderVote':
+        return this.voteSurrender(client.id, !!msg.yes);
       case 'dance': {
         const p = this.players?.get(client.id);
         if (!p || !p.powers.includes('danca') || !['playing', 'intro', 'swap', 'gameover'].includes(this.phase)) return;
@@ -315,7 +383,7 @@ export class Room {
 
   touchActivity(p) {
     p.lastActive = this.time;
-    if (p.dead && !p.discAt) {
+    if (p.dead && p.discAt == null) {
       p.dead = false;
       this.ev({ k: 'msg', text: `${p.name} voltou: taco vivo de novo.` });
     }
@@ -357,7 +425,7 @@ export class Room {
           retaThrow: null,
           penaltyThrow: null,
           dead: false,
-          discAt: 0,
+          discAt: null,
           lastActive: 0,
           ai: {},
           powers: this.rules.powers ? m.powers || [] : [],
@@ -367,6 +435,8 @@ export class Room {
     this.score = [0, 0];
     this.battingTeam = 0;
     this.winner = null;
+    this.surrender = null;
+    this.surrenderedTeam = null;
     this.ball = this.newBall();
     this.knocked = [false, false];
     this.resetCounters();
@@ -615,6 +685,10 @@ export class Room {
     this.frame++;
     if (this.phase === 'lobby') return;
     this.time += DT;
+    if (this.surrender && this.time > this.surrender.until) {
+      this.ev({ k: 'msg', text: 'O pedido de rendição expirou. O jogo continua!' });
+      this.surrender = null;
+    }
     switch (this.phase) {
       case 'decide':
         this.tickDecide();
@@ -664,8 +738,8 @@ export class Room {
     }
     for (const p of this.players.values()) {
       const m = this.members.get(p.id);
-      if (p.discAt && t - p.discAt > 8) {
-        p.discAt = 0;
+      if (p.discAt != null && t - p.discAt > 8) {
+        p.discAt = null;
         p.dead = false;
         p.bot = true;
         if (m) m.bot = true;
@@ -1154,14 +1228,50 @@ export class Room {
 
   payMatch(winner) {
     if (!this.lobby.reward) return;
+    const gaveUp = this.surrenderedTeam;
     for (const t of [0, 1])
       for (const id of this.seats[t]) {
         const m = this.members.get(id);
         if (!m?.pub || m.bot) continue;
         const won = t === winner;
-        this.lobby.reward(m.pub, won ? REWARDS.win : REWARDS.loss, { game: true, win: won });
+        // A team that surrendered gets no consolation coins.
+        const coins = won ? REWARDS.win : t === gaveUp ? 0 : REWARDS.loss;
+        this.lobby.reward(m.pub, coins, { game: true, win: won });
       }
-    this.ev({ k: 'msg', text: `🪙 +${REWARDS.win} para cada vencedor, +${REWARDS.loss} para cada perdedor.` });
+    this.ev({
+      k: 'msg',
+      text: gaveUp != null ? `🪙 +${REWARDS.win} para cada vencedor. Quem se rendeu não ganha moedas.` : `🪙 +${REWARDS.win} para cada vencedor, +${REWARDS.loss} para cada perdedor.`,
+    });
+  }
+
+  // ---------------------------------------------------------------- surrender (rendição)
+  // A player asks to give up; a human partner must agree (bots always agree). The other
+  // team wins and everyone can leave without leaving a half-played match behind.
+  requestSurrender(id) {
+    const p = this.players?.get(id);
+    if (!p || !['playing', 'paused', 'intro', 'swap', 'final', 'decide'].includes(this.phase)) return;
+    if (this.surrender) return;
+    const partner = [...this.players.values()].find((x) => x.team === p.team && x.id !== id);
+    const partnerHuman = partner && !partner.bot && this.members.get(partner.id)?.client;
+    if (!partnerHuman) return this.doSurrender(p.team, `${p.name} pediu rendição.`);
+    this.surrender = { team: p.team, by: id, name: p.name, partner: partner.id, until: this.time + 15 };
+    this.ev({ k: 'msg', text: `${p.name} pediu rendição. ${partner.name} precisa aceitar.` });
+  }
+
+  voteSurrender(id, yes) {
+    const s = this.surrender;
+    if (!s || s.partner !== id) return;
+    this.surrender = null;
+    const partner = this.players.get(id);
+    if (yes) return this.doSurrender(s.team, `${s.name} e ${partner.name} se renderam.`);
+    this.ev({ k: 'msg', text: `${partner.name} recusou a rendição. O jogo continua!` });
+  }
+
+  doSurrender(team, text) {
+    this.surrender = null;
+    this.surrenderedTeam = team;
+    if (this.phase === 'paused') this.pause = null;
+    this.win(1 - team, `${text} Vitória do Time ${this.teamName(1 - team)}.`);
   }
 
   // Registered teams (duplas) with at least one member connected to this room.
@@ -1466,29 +1576,31 @@ export class Room {
 
     for (const p of this.players.values()) {
       if (p.team !== this.battingTeam) continue;
-      // Bat contact.
-      if (!final && p.swingT >= 0.05 && p.swingT <= 0.32 && !p.swingHit) {
-        const dx = b.x - p.x;
-        const dz = b.z - p.z;
-        const d = hyp(dx, dz);
-        const fx = Math.sin(p.rot);
-        const fz = Math.cos(p.rot);
-        if (d < 1.35 && d > 0.1 && b.y < 1.5 && (dx * fx + dz * fz) / d > -0.15) {
-          this.hitBall(p);
-          continue;
-        }
-      }
-      // Body contact (lancha / final hit).
-      if (b.lanchaDone || speed < 2) continue;
-      if (lt.kind === 'hit' && lt.by === p.id && this.time - lt.t < 0.4) continue;
-      if (lt.kind === 'none') continue;
-      if (hyp(b.x - p.x, b.z - p.z) < 0.34 && b.y < 1.75) {
+      const dx = b.x - p.x;
+      const dz = b.z - p.z;
+      const d = hyp(dx, dz);
+      // Body first: a ball that reaches the body is never a bat hit (lancha / final hit),
+      // even in the middle of a swing.
+      if (d < BODY_R && b.y < 1.75) {
+        if (b.lanchaDone || speed < 2 || lt.kind === 'none') continue;
+        if (lt.kind === 'hit' && lt.by === p.id && this.time - lt.t < 0.4) continue;
         if (final) {
           if (lt.kind === 'final') this.finalHit(p);
           return true;
         }
         if (lt.kind !== 'hit') this.lanchaHit(p);
         else b.lanchaDone = true;
+        continue;
+      }
+      // Bat contact only where the bat is: during the swing the bat sweeps from the
+      // batter's right, through the front (sweet spot), to the left, between the hands
+      // (~0.45 m) and the tip (~1.35 m), from knee to chest height.
+      if (!final && p.swingT >= SWING_START && p.swingT <= SWING_END && !p.swingHit && b.y > 0.1 && b.y < 1.5) {
+        if (d < BAT_NEAR || d > BAT_FAR) continue;
+        const fx = Math.sin(p.rot);
+        const fz = Math.cos(p.rot);
+        const ballAngle = Math.atan2(dx * -fz + dz * fx, dx * fx + dz * fz); // + = batter's right
+        if (Math.abs(ballAngle - batAngle(p.swingT)) < BAT_HALF_WIDTH) this.hitBall(p);
       }
     }
 
@@ -1613,6 +1725,7 @@ export class Room {
       if (this.reta) msg.re = { s: this.reta.state, x: r2(this.reta.x), z: r2(this.reta.z), h: this.reta.hitter };
       if (this.pause) msg.pa = { by: this.pause.by, name: this.pause.name, left: Math.max(0, Math.ceil(this.pause.until - this.time)) };
       if (this.phase === 'gameover') msg.win = { team: this.winner, text: this.winText };
+      if (this.surrender) msg.sr = { team: this.surrender.team, by: this.surrender.by, name: this.surrender.name, partner: this.surrender.partner, left: Math.ceil(this.surrender.until - this.time) };
     }
     if (ev.length) msg.ev = ev;
     const data = JSON.stringify(msg);

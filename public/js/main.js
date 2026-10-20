@@ -18,6 +18,7 @@ import {
 import { buildAvatar } from './avatar.js';
 import { drawBallSkin } from './skins.js';
 import { World } from './scene.js';
+import { buildScenario, SCENARIO_INFO } from './scenarios.js';
 import { sfx, setMuted, isMuted } from './audio.js';
 import { HELP_HTML } from './help.js';
 import { VoiceChat } from './voice.js';
@@ -421,6 +422,7 @@ function renderLobby() {
   const rules = $('#rules');
   rules.innerHTML = '';
   for (const [key, def] of Object.entries(RULE_DEFS)) {
+    if (key === 'scenario') continue; // chosen in step 1
     const lab = document.createElement('label');
     lab.innerHTML = `${esc(def.label)}<select ${host ? '' : 'disabled'}>${def.options
       .map(([v, l], i) => `<option value="${i}" ${v === r.rules[key] ? 'selected' : ''}>${esc(l)}</option>`)
@@ -448,9 +450,90 @@ function renderLobby() {
     b.onclick = () => (mine ? send({ t: 'ballSkin', skin: k }) : (shopTab = 'ball', renderShop(), openModal('#shopBox')));
     bs.appendChild(b);
   }
+  renderSetup();
+  const champMode = r.mode === 'champ';
+  $('#startGame').classList.toggle('hidden', champMode);
+  $('#champPanel').classList.toggle('hidden', !champMode);
   $('#startGame').disabled = !host || !!r.champ;
   $('#hostHint').textContent = host ? 'Você é o anfitrião.' : 'Aguardando o anfitrião começar a partida.';
   renderChampPanel();
+}
+
+// ------------------------------------------------------------------ room setup wizard
+const MAPS = [
+  ['campinho', 'Campinho', 'Grama de várzea, cerca de madeira e mato em volta.'],
+  ['rua', 'Rua de bairro', 'Asfalto, calçadas e muros. A bola rola longe.'],
+  ['sitio', 'Sítio', 'Terreiro de terra, celeiro, milharal e vacas.'],
+  ['mercado', 'Estacionamento', 'Vagas pintadas, carros e o supermercado ao fundo.'],
+  ['praia', 'Praia', 'Areia fofa, coqueiros e o mar. A bola para rápido.'],
+];
+const MODES = [
+  ['single', '⚔️', 'Partida única', 'Um jogo 2 contra 2. Vagas vazias viram bots.'],
+  ['champ', '🏆', 'Campeonato', 'Duplas registradas, todos contra todos. 1º, 2º e 3º ganham moedas.'],
+];
+const STEPS = ['Mapa', 'Modo', 'Regras e jogadores'];
+
+function renderSetup() {
+  const r = state.room;
+  const host = isHost();
+  const step = r.champ ? 3 : r.setupStep || 1;
+  $('#stepper').innerHTML = STEPS.map(
+    (label, i) =>
+      `<button class="step-pill ${i + 1 === step ? 'on' : ''} ${i + 1 < step ? 'done' : ''}" data-step="${i + 1}" ${host && !r.champ && i + 1 < step ? '' : 'disabled'}>${i + 1}. ${label}</button>`,
+  ).join('<span class="step-sep">›</span>');
+  $('#stepper').querySelectorAll('[data-step]').forEach((b) => (b.onclick = () => send({ t: 'setup', step: Number(b.dataset.step) })));
+  $('#stepMap').classList.toggle('hidden', step !== 1);
+  $('#stepMode').classList.toggle('hidden', step !== 2);
+  $('#stepRules').classList.toggle('hidden', step !== 3);
+  const wait = host ? '' : `<p class="muted center">Aguardando o anfitrião escolher…</p>`;
+  if (step === 1) {
+    $('#stepMap').innerHTML = `<h2 class="center">Escolha o mapa</h2>${wait}<div class="map-grid">${MAPS.map(
+      ([k, name, desc]) =>
+        `<button class="map-card ${r.rules.scenario === k ? 'sel' : ''}" data-map="${k}" ${host ? '' : 'disabled'}><img alt="" src="${scenarioThumb(k)}" /><b>${name}</b><span>${desc}</span></button>`,
+    ).join('')}</div>`;
+    $('#stepMap').querySelectorAll('[data-map]').forEach((b) => (b.onclick = () => send({ t: 'setup', scenario: b.dataset.map, step: 2 })));
+  } else if (step === 2) {
+    const map = MAPS.find(([k]) => k === r.rules.scenario);
+    $('#stepMode').innerHTML = `<h2 class="center">Partida única ou campeonato?</h2><p class="center muted">Mapa: <b>${map ? map[1] : ''}</b></p>${wait}<div class="map-grid modes">${MODES.map(
+      ([k, icon, name, desc]) =>
+        `<button class="map-card mode-card ${r.mode === k ? 'sel' : ''}" data-mode="${k}" ${host ? '' : 'disabled'}><span class="mode-icon">${icon}</span><b>${name}</b><span>${desc}</span></button>`,
+    ).join('')}</div>`;
+    $('#stepMode').querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => send({ t: 'setup', mode: b.dataset.mode, step: 3 })));
+  } else {
+    const map = MAPS.find(([k]) => k === r.rules.scenario);
+    const mode = MODES.find(([k]) => k === r.mode);
+    $('#setupSummary').innerHTML = `<img alt="" src="${scenarioThumb(r.rules.scenario)}" /><div><b>${map ? map[1] : ''}</b><br/><span class="muted small">${mode ? `${mode[1]} ${mode[2]}` : ''}</span></div>`;
+  }
+}
+
+// Square map previews rendered once from the real scenario builders.
+const thumbCache = new Map();
+let thumbRenderer = null;
+function scenarioThumb(name) {
+  if (thumbCache.has(name)) return thumbCache.get(name);
+  try {
+    if (!thumbRenderer) {
+      thumbRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      thumbRenderer.setSize(360, 270);
+      thumbRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    }
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(SCENARIO_INFO[name]?.sky || '#9fd3f5');
+    scene.add(new THREE.HemisphereLight('#ffffff', '#4a6b3a', 1));
+    const sun = new THREE.DirectionalLight('#fff4d6', 1.5);
+    sun.position.set(18, 30, 10);
+    scene.add(sun);
+    scene.add(buildScenario(name));
+    const cam = new THREE.PerspectiveCamera(50, 360 / 270, 0.1, 400);
+    cam.position.set(-34, 30, -26);
+    cam.lookAt(0, 0, 4);
+    thumbRenderer.render(scene, cam);
+    const url = thumbRenderer.domElement.toDataURL('image/jpeg', 0.85);
+    thumbCache.set(name, url);
+    return url;
+  } catch {
+    return '';
+  }
 }
 
 const champPick = new Set();
@@ -727,6 +810,7 @@ function setupLobby() {
 function ensureWorld() {
   if (state.world) return;
   state.world = new World($('#viewport'));
+  applySettings();
   let last = performance.now();
   let sendAcc = 0;
   const loop = (now) => {
@@ -823,7 +907,36 @@ function frameContext(dt) {
   };
 }
 
-const TURN_SPEED = 2.4; // rad/s for Q/E
+const TURN_SPEED = 1.6; // rad/s for Q/E
+// Camera settings, saved per browser. sens 1 = same as the desktop cursor.
+const SETTINGS_DEFAULT = { sens: 1, invertY: false, dist: 1, fov: 55, autoFace: true };
+const settings = loadSettings();
+function loadSettings() {
+  try {
+    const v = JSON.parse(localStorage.getItem('taco-settings') || '{}');
+    const old = Number(localStorage.getItem('taco-sens'));
+    if (old && !v.sens) v.sens = old;
+    return { ...SETTINGS_DEFAULT, ...v };
+  } catch {
+    return { ...SETTINGS_DEFAULT };
+  }
+}
+function saveSettings() {
+  try {
+    localStorage.setItem('taco-settings', JSON.stringify(settings));
+  } catch {
+    /* ignore */
+  }
+}
+function applySettings() {
+  const w = state.world;
+  if (!w) return;
+  w.camDist = settings.dist;
+  if (w.camera.fov !== settings.fov) {
+    w.camera.fov = settings.fov;
+    w.camera.updateProjectionMatrix();
+  }
+}
 function wrapAngle(a) {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -851,7 +964,7 @@ function updateCameraYaw(dt, L, mp, ph) {
     if (ph === 'intro') state.yawGoal = faceFieldYaw(L);
     lastYawPhase = ph;
   }
-  const idle = L.speed < 0.3 && performance.now() - state.lastLook > 1500;
+  const idle = settings.autoFace && L.speed < 0.3 && performance.now() - state.lastLook > 1500;
   if (state.yawGoal == null && idle && ph === 'playing' && state.room) {
     const half = state.room.rules.baseDistance / 2;
     const atBase = Math.abs(Math.abs(L.z) - half) < 2.8 && Math.abs(L.x) < 3;
@@ -932,6 +1045,11 @@ function chatFocused() {
 function setupInput() {
   window.addEventListener('keydown', (e) => {
     if (!$('#game').classList.contains('active') || chatFocused()) return;
+    if (e.code === 'Escape') {
+      // With the mouse captured the browser uses Esc to release it; the next Esc opens the menu.
+      if (!state.locked && myPlayer()) toggleGameMenu();
+      return;
+    }
     if (e.code === 'Enter') {
       document.exitPointerLock?.();
       $('#gameChatInput').focus();
@@ -983,6 +1101,13 @@ function setupInput() {
       case 'KeyB':
         if (voice.on) voice.toggleMute();
         break;
+      case 'BracketLeft':
+      case 'BracketRight':
+        settings.sens = Math.max(0.2, Math.min(3, +(settings.sens + (e.code === 'BracketRight' ? 0.1 : -0.1)).toFixed(2)));
+        saveSettings();
+        syncSettingsPanel();
+        toast(`Sensibilidade ${settings.sens.toFixed(2)}×`);
+        break;
       case 'KeyG':
         if (state.room?.members.find((m) => m.id === state.myId)?.powers.includes('danca')) send({ t: 'dance' });
         else toast('Compre a Dancinha na loja para dançar 💃');
@@ -996,6 +1121,17 @@ function setupInput() {
   window.addEventListener('keyup', (e) => state.keys.delete(e.code));
   window.addEventListener('blur', () => state.keys.clear());
   document.querySelector('[data-close-help]').onclick = () => $('#helpBox').classList.add('hidden');
+  $('#menuBtn').onclick = () => toggleGameMenu();
+  setupSettingsPanel();
+  document.querySelectorAll('[data-menu]').forEach(
+    (b) =>
+      (b.onclick = () => {
+        const a = b.dataset.menu;
+        $('#gameMenu').classList.add('hidden');
+        if (a === 'surrender') send({ t: 'surrender' });
+        else if (a === 'leave' && confirm('Sair da partida? Um bot vai jogar no seu lugar.')) send({ t: 'leave' });
+      }),
+  );
 
   const vp = $('#viewport');
   vp.addEventListener('pointermove', (e) => {
@@ -1011,8 +1147,14 @@ function setupInput() {
   document.addEventListener('mousemove', (e) => {
     if (!state.locked || !state.world) return;
     const w = state.world;
-    w.yaw = wrapAngle(w.yaw - e.movementX * 0.0035);
-    w.pitch = Math.max(-0.35, Math.min(1.25, w.pitch + e.movementY * 0.0028));
+    // Same feel as the desktop cursor: dragging the mouse across the whole screen turns
+    // the view by the horizontal field of view (movementX already carries the OS mouse
+    // speed/acceleration). The menu slider scales it.
+    const vfov = (w.camera.fov * Math.PI) / 180;
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * w.camera.aspect);
+    const k = (hfov / Math.max(1, window.innerWidth)) * settings.sens;
+    w.yaw = wrapAngle(w.yaw - e.movementX * k);
+    w.pitch = Math.max(-0.35, Math.min(1.25, w.pitch + e.movementY * k * (settings.invertY ? -1 : 1)));
     state.lastLook = performance.now();
     state.yawGoal = null;
   });
@@ -1045,10 +1187,73 @@ function setupInput() {
     'wheel',
     (e) => {
       if (!state.world) return;
-      state.world.camDist = Math.max(0.55, Math.min(2.2, state.world.camDist * (e.deltaY > 0 ? 1.1 : 0.9)));
+      settings.dist = Math.max(0.55, Math.min(2.2, settings.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
+      applySettings();
+      saveSettings();
+      syncSettingsPanel();
     },
     { passive: true },
   );
+}
+
+// In-game camera settings (menu ☰ / Esc). Keys [ and ] change the sensitivity on the fly.
+const SETTING_FIELDS = [
+  ['sens', 'Sensibilidade do mouse', 0.2, 3, 0.05, (v) => `${v.toFixed(2)}×`],
+  ['dist', 'Distância da câmera', 0.55, 2.2, 0.05, (v) => `${v.toFixed(2)}×`],
+  ['fov', 'Campo de visão', 45, 90, 1, (v) => `${v}°`],
+];
+function setupSettingsPanel() {
+  const box = $('#settingsPanel');
+  box.innerHTML =
+    SETTING_FIELDS.map(
+      ([k, label, min, max, step]) =>
+        `<label class="sens">${label} <span data-val="${k}"></span><input type="range" data-set="${k}" min="${min}" max="${max}" step="${step}" /></label>`,
+    ).join('') +
+    `<label class="check"><input type="checkbox" data-check="invertY" /> Inverter eixo vertical</label>
+     <label class="check"><input type="checkbox" data-check="autoFace" /> Parado na base, a câmera vira sozinha para o campo</label>
+     <button class="ghost" data-reset>Restaurar padrão</button>
+     <p class="muted small">Sensibilidade 1× = igual ao cursor do PC (vale a velocidade do mouse do sistema). Atalhos: <kbd>[</kbd> <kbd>]</kbd> sensibilidade, roda do mouse distância.</p>`;
+  box.querySelectorAll('[data-set]').forEach(
+    (inp) =>
+      (inp.oninput = () => {
+        settings[inp.dataset.set] = Number(inp.value);
+        applySettings();
+        saveSettings();
+        syncSettingsPanel();
+      }),
+  );
+  box.querySelectorAll('[data-check]').forEach(
+    (inp) =>
+      (inp.onchange = () => {
+        settings[inp.dataset.check] = inp.checked;
+        saveSettings();
+      }),
+  );
+  box.querySelector('[data-reset]').onclick = () => {
+    Object.assign(settings, SETTINGS_DEFAULT);
+    applySettings();
+    saveSettings();
+    syncSettingsPanel();
+  };
+  syncSettingsPanel();
+}
+function syncSettingsPanel() {
+  const box = $('#settingsPanel');
+  for (const [k, , , , , fmt] of SETTING_FIELDS) {
+    const inp = box.querySelector(`[data-set="${k}"]`);
+    if (inp) inp.value = String(settings[k]);
+    const val = box.querySelector(`[data-val="${k}"]`);
+    if (val) val.textContent = fmt(settings[k]);
+  }
+  box.querySelectorAll('[data-check]').forEach((inp) => (inp.checked = !!settings[inp.dataset.check]));
+}
+
+function toggleGameMenu() {
+  const m = $('#gameMenu');
+  const open = m.classList.contains('hidden');
+  m.classList.toggle('hidden', !open);
+  if (open) document.exitPointerLock?.();
+  m.querySelector('[data-menu="surrender"]').disabled = !['playing', 'paused', 'intro', 'swap', 'final', 'decide'].includes(state.snap?.ph);
 }
 
 function chargePower() {
@@ -1188,6 +1393,31 @@ function renderHud(s) {
     pb.innerHTML = `<div class="modal-card"><h2>⏸ TEMPO</h2><p>${esc(s.pa.name)} pediu tempo (licença betes / tempo-para-dois).</p><p>Retoma sozinho em <b>${s.pa.left}s</b>.</p><p class="muted">O time que pediu aperta <kbd>T</kbd> para voltar (os outros podem após 30s).</p></div>`;
   } else pb.classList.add('hidden');
 
+  // Surrender request
+  const sb = $('#surrenderBox');
+  if (s.sr) {
+    const mine = s.sr.partner === state.myId;
+    const asked = s.sr.by === state.myId;
+    // Build the prompt once per request; only the countdown changes afterwards, so the
+    // buttons are never replaced under the player's mouse.
+    const sig = `${s.sr.by}:${mine}`;
+    if (sb.dataset.sig === sig) {
+      const left = sb.querySelector('.sr-left');
+      if (left) left.textContent = s.sr.left;
+    } else {
+      sb.dataset.sig = sig;
+      sb.classList.remove('hidden');
+      sb.innerHTML = mine
+        ? `<div class="modal-card"><h2>🏳️ Rendição?</h2><p><b>${esc(s.sr.name)}</b> quer se render. O outro time vence a partida.</p><p class="muted small"><span class="sr-left">${s.sr.left}</span>s para responder</p><div class="choices"><button class="primary" data-sr="1">Aceitar</button><button data-sr="0">Recusar e continuar</button></div></div>`
+        : `<div class="modal-card"><p>🏳️ ${asked ? 'Você pediu' : `${esc(s.sr.name)} pediu`} rendição — aguardando o parceiro (<span class="sr-left">${s.sr.left}</span>s)</p></div>`;
+      sb.querySelectorAll('[data-sr]').forEach((b) => (b.onclick = () => send({ t: 'surrenderVote', yes: b.dataset.sr === '1' })));
+      if (mine) document.exitPointerLock?.();
+    }
+  } else if (!sb.classList.contains('hidden')) {
+    sb.classList.add('hidden');
+    sb.dataset.sig = '';
+  }
+
   // Game over
   const ob = $('#overBox');
   if (s.ph === 'gameover' && s.win) {
@@ -1207,7 +1437,7 @@ function renderHud(s) {
         s.win.text,
       )}</p><p><b>${s.sc[0]}</b> × <b>${s.sc[1]}</b></p>${champ ? `${podium}${champHtml(champ)}` : ''}<p class="muted small">Dancinha comprada? Aperte <kbd>G</kbd> para comemorar.</p>${
         isHost() ? `<button class="primary" id="againBtn">${next}</button>` : '<p class="muted">Aguardando o anfitrião...</p>'
-      } <button id="quitBtn">Sair</button></div>`;
+      } <button id="quitBtn">Sair da sala</button></div>`;
       $('#againBtn')?.addEventListener('click', () => send({ t: 'again' }));
       $('#quitBtn').onclick = () => send({ t: 'leave' });
     }
@@ -1250,7 +1480,7 @@ function renderDecide(s) {
         d.captains[0] === me
           ? `<div class="choices"><button class="primary" data-c="molhado">💧 Molhado</button><button class="primary" data-c="seco">☀️ Seco</button></div>`
           : `<p class="muted">Aguardando ${esc(capName(0))} escolher...</p>`;
-    } else if (d.stage === 'flip') html += `<p style="font-size:3rem;animation:spin 0.4s linear infinite">🏏</p><p>Time ${tName(0)} escolheu <b>${d.choice}</b>. Taco no ar...</p>`;
+    } else if (d.stage === 'flip') html += `<div class="flip-stage"><span class="flip-bat">🏏</span></div><p>Time ${tName(0)} escolheu <b>${d.choice}</b>. Taco no ar...</p>`;
     else html += `<p>Caiu <b>${d.result}</b>! Time <b>${tName(d.winner)}</b> começa no taco.</p>`;
   } else if (d.method === 'parimpar') {
     html = `<h2>✋ Par ou ímpar</h2>`;

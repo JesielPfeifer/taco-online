@@ -31,7 +31,9 @@ git clone https://github.com/JesielPfeifer/taco-online.git && cd taco-online
 docker compose up -d --build        # porta: TACO_PORT=8080 docker compose up -d
 ```
 
-Abra `http://IP-DO-SERVIDOR:3000`, crie uma sala e mande o link (`/?sala=CODIGO`) para os amigos.
+Abra `http://IP-DO-SERVIDOR:3000`, crie uma sala e mande o link (`/?sala=CODIGO`) para os amigos. A sala é montada em
+três etapas, como a escolha de mapa do Counter-Strike: **mapa** (cartões com prévia), **modo** (partida única ou
+campeonato) e **regras e jogadores**. Recarregar a página (F5) no meio da partida devolve o jogador ao mesmo lugar.
 
 **Dados**: moedas, compras, times e campeonatos ficam em `/data/taco.json` (volume `taco-data` no compose).
 No `docker run`, adicione `-v taco-data:/data`. Cada navegador guarda uma chave secreta do jogador; limpar os
@@ -61,13 +63,15 @@ Requer Node.js 20+. Variável `PORT` muda a porta (padrão 3000).
 | Todos | `W A S D` / setas | Mover livremente (relativo à câmera) |
 | Todos | `Shift` | Correr (gasta fôlego; no mato anda pela metade) |
 | Todos | Mouse | Mirar |
-| Rebatedor | Clique | Rebater na direção do mouse — o tempo do clique define força e precisão |
+| Rebatedor | Clique | Rebater na direção do mouse — o tempo do clique define força e precisão. Só vale se a bola encontrar o **taco**; no corpo é lancha |
 | Rebatedor | `Espaço` | Bater os tacos no meio (também acontece sozinho ao se encontrarem lado a lado) |
 | Rebatedor | `N` / `L` | Pedir "nada" / pedir licença |
 | Lançador | Segurar e soltar clique | Carregar a força (barra sobe e desce) e lançar |
 | Lançador | `F` ou botão direito | Queimar a casinha na mão (só se estiver desprotegida) |
 | Lançador | `R` / `P` | Pedir "reta" (bete-ombro) / gritar "pátio" |
 | Todos | `T` | Pedir tempo |
+| Todos | `Esc` / ☰ | Menu: ajustes de câmera (sensibilidade, inverter Y, distância, campo de visão), pedir rendição, sair (um bot assume) |
+| Todos | `[` / `]` | Diminuir / aumentar a sensibilidade do mouse |
 | Todos | Clique no campo + mouse | Prende o mouse: girar a câmera, mira no centro da tela (`Esc` solta) |
 | Todos | `Q` / `E`, `X` | Girar a câmera pelo teclado, meia-volta |
 | Todos | `C`, `V`, roda do mouse | 1ª/3ª pessoa, câmera geral, zoom |

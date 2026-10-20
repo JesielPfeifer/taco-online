@@ -208,7 +208,7 @@ function batter(room, p) {
         if (Math.random() < 0.3) return;
         room.act(p, 'swing', {});
         ai.aimX = (Math.random() - 0.5) * 18;
-        ai.react = 0.08 + Math.random() * 0.22;
+        ai.react = 0.12 + Math.random() * 0.12;
       }
     }
   }

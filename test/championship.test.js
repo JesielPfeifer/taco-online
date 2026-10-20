@@ -83,3 +83,30 @@ test('loja: compra, saldo e item premium só com posse', () => {
   lobby.handle(c, { t: 'profile', name: 'Ana', avatar: { hat: 10 } });
   assert.notEqual(c.avatar.hat, 10);
 });
+
+test('F5: o mesmo jogador volta para o seu lugar em campo, não como espectador', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taco-'));
+  const lobby = new Lobby(new Store(dir));
+  const ana = fakeClient(lobby, 'Ana');
+  const key = ana.key;
+  lobby.handle(ana, { t: 'create' });
+  const room = ana.room;
+  clearInterval(room.timer);
+  room.rules.startMethod = 'aleatorio';
+  lobby.handle(ana, { t: 'start' });
+  const seatId = ana.id;
+  assert.ok(room.players.has(seatId));
+  // Reload: socket closes, a new one connects with the same key and joins the room.
+  room.leave(ana.id, true);
+  for (let i = 0; i < 60 * 15; i++) room.tick(); // long enough for a bot to take over
+  assert.equal(room.players.get(seatId).bot, true);
+  const inbox = [];
+  lobby.connect({ readyState: 1, send: (d) => inbox.push(JSON.parse(d)), on() {} });
+  const again = [...lobby.clients.values()].at(-1);
+  lobby.handle(again, { t: 'profile', name: 'Ana', key, avatar: {} });
+  lobby.handle(again, { t: 'join', code: room.code });
+  assert.equal(again.id, seatId, 'assumiu o mesmo id/lugar');
+  assert.equal(room.players.get(seatId).bot, false);
+  assert.ok(inbox.some((m) => m.t === 'welcome' && m.id === seatId));
+  assert.ok(room.seats.flat().includes(seatId));
+});
