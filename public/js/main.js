@@ -10,6 +10,10 @@ import {
   defaultAvatar,
   randomAvatar,
   sanitizeAvatar,
+  PREMIUM,
+  POWERS,
+  REWARDS,
+  ownsBall,
 } from '/shared/config.js';
 import { buildAvatar } from './avatar.js';
 import { drawBallSkin } from './skins.js';
@@ -41,11 +45,29 @@ const voice = new VoiceChat((m) => send(m), () => renderVoice());
 function loadProfile() {
   try {
     const p = JSON.parse(localStorage.getItem('taco-profile') || 'null');
-    if (p) return { name: p.name || '', avatar: sanitizeAvatar(p.avatar) };
+    if (p) return { name: p.name || '', avatar: sanitizeAvatar(p.avatar), key: p.key || newKey() };
   } catch {
     /* ignore */
   }
-  return { name: '', avatar: defaultAvatar() };
+  return { name: '', avatar: defaultAvatar(), key: newKey() };
+}
+
+// Secret player key (identifies the wallet on the server). crypto.randomUUID only exists
+// in secure contexts, so build a v4 UUID from getRandomValues (works on plain http too).
+function newKey() {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+// Team label/colour: registered team names during a championship, Azul/Vermelho otherwise.
+function tName(t) {
+  return state.room?.teamLabels?.[t] || TEAM_NAMES[t];
+}
+function tColor(t) {
+  return state.room?.teamColors?.[t] || TEAM_COLORS[t];
 }
 function saveProfile() {
   try {
@@ -81,7 +103,7 @@ function send(msg) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 function sendProfile() {
-  send({ t: 'profile', name: state.profile.name || 'Jogador', avatar: state.profile.avatar });
+  send({ t: 'profile', name: state.profile.name || 'Jogador', avatar: state.profile.avatar, key: state.profile.key });
 }
 
 function onMessage(m) {
@@ -94,6 +116,17 @@ function onMessage(m) {
       break;
     case 'err':
       toast(m.msg);
+      break;
+    case 'me':
+      state.me = m.me;
+      renderWallet();
+      break;
+    case 'bought':
+      sfx.point();
+      toast('Compra feita! 🛍️');
+      break;
+    case 'ranking':
+      renderRanking(m);
       break;
     case 'rtc':
       voice.signal(m.from, m.data);
@@ -134,7 +167,11 @@ function toast(text) {
 // ------------------------------------------------------------------ menu / customizer
 let preview;
 function setupMenu() {
+  saveProfile(); // persists a freshly generated player key right away
   $('#name').value = state.profile.name;
+  for (const b of document.querySelectorAll('[data-open-shop]')) b.onclick = () => (renderShop(), openModal('#shopBox'));
+  for (const b of document.querySelectorAll('[data-open-teams]')) b.onclick = () => (renderTeams(), openModal('#teamsBox'));
+  for (const b of document.querySelectorAll('[data-open-rank]')) b.onclick = () => send({ t: 'ranking' });
   $('#name').addEventListener('input', (e) => {
     state.profile.name = e.target.value.slice(0, 16);
     saveProfile();
@@ -201,12 +238,18 @@ function renderCustomizer() {
         .join('')}</div>`;
       el.querySelectorAll('.swatch').forEach((b) => (b.onclick = () => setPart(key, Number(b.dataset.i))));
     } else {
-      el.innerHTML = `<div class="label">${esc(def.label)} · ${idx + 1}/${def.options.length}</div><div class="row"><button data-d="-1">◀</button><span class="value">${esc(
-        def.options[idx],
-      )}</span><button data-d="1">▶</button></div>`;
-      el.querySelectorAll('button').forEach(
+      // Premium options can be tried on in the preview, but the server only keeps them once bought.
+      const price = PREMIUM[key]?.[idx];
+      const locked = price && !owned().includes(`${key}:${idx}`);
+      el.innerHTML = `<div class="label">${esc(def.label)} · ${idx + 1}/${def.options.length}</div><div class="row"><button data-d="-1">◀</button><span class="value">${
+        locked ? '🔒 ' : ''
+      }${esc(def.options[idx])}</span><button data-d="1">▶</button></div>${
+        locked ? `<button class="primary buy-inline" data-buy="${key}:${idx}">Comprar por 🪙 ${price}</button>` : ''
+      }`;
+      el.querySelectorAll('[data-d]').forEach(
         (b) => (b.onclick = () => setPart(key, (idx + Number(b.dataset.d) + def.options.length) % def.options.length)),
       );
+      el.querySelector('[data-buy]')?.addEventListener('click', () => send({ t: 'buy', item: `${key}:${idx}` }));
     }
     root.appendChild(el);
   }
@@ -294,7 +337,12 @@ function teamOf(id) {
 function onRoom(m) {
   const prevPhase = state.room?.phase;
   state.room = m;
-  state.members = new Map(m.members.map((x) => [x.id, { ...x, team: teamOf(x.id) }]));
+  state.members = new Map(
+    m.members.map((x) => {
+      const team = teamOf(x.id);
+      return [x.id, { ...x, team, color: team == null ? '#fff' : tColor(team) }];
+    }),
+  );
   history.replaceState(null, '', `/?sala=${m.code}`);
   voice.sync(state.myId, m.members);
   renderVoice();
@@ -306,6 +354,7 @@ function onRoom(m) {
     $('#overBox').classList.add('hidden');
   } else {
     ensureWorld();
+    state.world.setScenario(m.rules.scenario);
     state.world.setBaseDistance(m.rules.baseDistance);
     if (state.world.ballSkin !== m.ballSkin) state.world.buildBall(m.ballSkin);
     const ids = m.seats.flat().filter(Boolean);
@@ -327,7 +376,7 @@ function renderLobby() {
   for (const t of [0, 1]) {
     const div = document.createElement('div');
     div.className = `team t${t}`;
-    div.innerHTML = `<h4 style="color:${TEAM_COLORS[t]}">Time ${TEAM_NAMES[t]}</h4>`;
+    div.innerHTML = `<h4 style="color:${tColor(t)}">Time ${tName(t)}</h4>`;
     for (const s of [0, 1]) {
       const id = r.seats[t][s];
       const m = id && state.members.get(id);
@@ -391,20 +440,55 @@ function renderLobby() {
     const c = document.createElement('canvas');
     c.width = 64;
     c.height = 64;
-    const g = c.getContext('2d');
-    g.drawImage(drawBallSkin(k), 0, 0, 128, 128, 0, 0, 64, 64);
-    const grd = g.createRadialGradient(22, 20, 4, 32, 32, 34);
-    grd.addColorStop(0, 'rgba(255,255,255,0.35)');
-    grd.addColorStop(1, 'rgba(0,0,0,0.35)');
-    g.fillStyle = grd;
-    g.fillRect(0, 0, 64, 64);
+    drawBallSwatch(c, k);
+    const mine = ownsBall(k, owned());
     b.appendChild(c);
-    b.appendChild(document.createTextNode(label));
-    b.onclick = () => send({ t: 'ballSkin', skin: k });
+    b.appendChild(document.createTextNode((mine ? '' : `🔒 🪙${PREMIUM.ball[k]} `) + label));
+    if (!mine) b.classList.add('locked');
+    b.onclick = () => (mine ? send({ t: 'ballSkin', skin: k }) : (shopTab = 'ball', renderShop(), openModal('#shopBox')));
     bs.appendChild(b);
   }
-  $('#startGame').disabled = !host;
+  $('#startGame').disabled = !host || !!r.champ;
   $('#hostHint').textContent = host ? 'Você é o anfitrião.' : 'Aguardando o anfitrião começar a partida.';
+  renderChampPanel();
+}
+
+const champPick = new Set();
+function renderChampPanel() {
+  const r = state.room;
+  const box = $('#champPanel');
+  const host = isHost();
+  if (r.champ) {
+    box.innerHTML = `<h3>🏆 Campeonato em andamento</h3>${champHtml(r.champ)}${host ? '<button class="ghost" id="champCancel">Encerrar campeonato</button>' : ''}`;
+    $('#champCancel')?.addEventListener('click', () => confirm('Encerrar o campeonato sem premiação?') && send({ t: 'champCancel' }));
+    return;
+  }
+  const teams = r.teams || [];
+  for (const id of [...champPick]) if (!teams.some((t) => t.id === id)) champPick.delete(id);
+  box.innerHTML = `<h3>🏆 Campeonato</h3>
+    <p class="muted small">Todos contra todos entre as duplas registradas (botão "Meus times" no menu). 1º, 2º e 3º lugares ganham moedas.</p>
+    ${
+      teams.length
+        ? teams
+            .map(
+              (t) =>
+                `<label class="champ-pick"><input type="checkbox" data-team="${t.id}" ${champPick.has(t.id) ? 'checked' : ''} ${host ? '' : 'disabled'} /> <b style="color:${t.color}">${esc(
+                  t.name,
+                )}</b> <span class="muted small">${t.members.map((m) => esc(m.name)).join(' & ')}</span></label>`,
+            )
+            .join('')
+        : '<p class="muted small">Nenhum time com jogador nesta sala.</p>'
+    }
+    ${host ? `<button class="primary" id="champStart" ${champPick.size < 2 ? 'disabled' : ''}>Iniciar campeonato (${champPick.size} times)</button>` : ''}`;
+  box.querySelectorAll('[data-team]').forEach(
+    (c) =>
+      (c.onchange = () => {
+        if (c.checked) champPick.add(c.dataset.team);
+        else champPick.delete(c.dataset.team);
+        renderChampPanel();
+      }),
+  );
+  $('#champStart')?.addEventListener('click', () => send({ t: 'champStart', teamIds: [...champPick] }));
 }
 
 function addChat(from, text) {
@@ -419,6 +503,166 @@ function addChat(from, text) {
     while (log.children.length > 60) log.removeChild(log.firstChild);
     log.scrollTop = log.scrollHeight;
   }
+}
+
+// ------------------------------------------------------------------ wallet, shop, teams, ranking
+function owned() {
+  return state.me?.owned || [];
+}
+
+function renderWallet() {
+  const coins = state.me ? state.me.coins : '…';
+  for (const el of document.querySelectorAll('.wallet')) el.textContent = `🪙 ${coins}`;
+  renderCustomizer();
+  if (!$('#shopBox').classList.contains('hidden')) renderShop();
+  if (!$('#teamsBox').classList.contains('hidden')) renderTeams();
+  if (state.room?.phase === 'lobby') renderLobby();
+}
+
+let shopTab = 'ball';
+function openModal(id) {
+  document.exitPointerLock?.();
+  $(id).classList.remove('hidden');
+}
+function renderShop() {
+  const coins = state.me?.coins ?? 0;
+  const own = owned();
+  const tabs = [
+    ['ball', 'Bolinhas'],
+    ['bat', 'Tacos'],
+    ['hat', 'Chapéus'],
+    ['power', 'Poderes'],
+  ];
+  let items = [];
+  if (shopTab === 'ball')
+    items = BALL_SKINS.filter(([k]) => PREMIUM.ball[k]).map(([k, label]) => ({ id: `ball:${k}`, name: label, price: PREMIUM.ball[k], ball: k }));
+  else if (shopTab === 'power') items = POWERS.map((p) => ({ id: `power:${p.id}`, name: p.name, desc: p.desc, price: p.price, power: p.id }));
+  else
+    items = Object.entries(PREMIUM[shopTab]).map(([i, price]) => ({
+      id: `${shopTab}:${i}`,
+      name: AVATAR_PARTS[shopTab].options[i],
+      price,
+      part: shopTab,
+      idx: Number(i),
+    }));
+  const off = state.me?.powersOff || [];
+  $('#shopBody').innerHTML = `
+    <div class="shop-head"><h2>🛒 Loja</h2><span class="wallet big-wallet">🪙 ${coins}</span></div>
+    <p class="muted small">Ganhe moedas jogando: vitória +${REWARDS.win}, derrota +${REWARDS.loss}. Campeonato: 1º +${REWARDS.champ[0]}, 2º +${REWARDS.champ[1]}, 3º +${REWARDS.champ[2]} para cada jogador da dupla.</p>
+    <div class="choices">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === shopTab ? 'sel' : ''}">${l}</button>`).join('')}</div>
+    <div class="shop-grid">${items
+      .map((it) => {
+        const has = own.includes(it.id);
+        let action = has ? '<span class="ok">✔ Seu</span>' : `<button class="primary" data-buy="${it.id}" ${coins < it.price ? 'disabled' : ''}>🪙 ${it.price}</button>`;
+        if (has && it.power)
+          action = `<button data-ptoggle="${it.power}">${off.includes(it.power) ? '⏸ Desligado' : '✅ Ativo'}</button>`;
+        if (has && it.part) action = `<button data-equip="${it.part}:${it.idx}">Usar</button>`;
+        return `<div class="shop-item">${it.ball ? `<canvas data-ball="${it.ball}" width="64" height="64"></canvas>` : `<div class="shop-icon">${it.power ? { folego: '🏃', mira: '🎯', danca: '💃' }[it.power] : it.part === 'bat' ? '🏏' : '🎩'}</div>`}<b>${esc(
+          it.name,
+        )}</b>${it.desc ? `<span class="muted small">${esc(it.desc)}</span>` : ''}${action}</div>`;
+      })
+      .join('')}</div>
+    <button class="ghost" data-close>Fechar</button>`;
+  const body = $('#shopBody');
+  body.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => ((shopTab = b.dataset.tab), renderShop())));
+  body.querySelectorAll('[data-buy]').forEach((b) => (b.onclick = () => send({ t: 'buy', item: b.dataset.buy })));
+  body.querySelectorAll('[data-ptoggle]').forEach(
+    (b) =>
+      (b.onclick = () => {
+        const id = b.dataset.ptoggle;
+        const offNew = off.includes(id) ? off.filter((x) => x !== id) : [...off, id];
+        send({ t: 'powers', off: offNew });
+      }),
+  );
+  body.querySelectorAll('[data-equip]').forEach(
+    (b) =>
+      (b.onclick = () => {
+        const [part, idx] = b.dataset.equip.split(':');
+        setPart(part, Number(idx));
+        toast('Equipado!');
+      }),
+  );
+  body.querySelectorAll('canvas[data-ball]').forEach((c) => drawBallSwatch(c, c.dataset.ball));
+  body.querySelector('[data-close]').onclick = () => $('#shopBox').classList.add('hidden');
+}
+
+function drawBallSwatch(c, k) {
+  const g = c.getContext('2d');
+  g.save();
+  g.beginPath();
+  g.arc(32, 32, 30, 0, Math.PI * 2);
+  g.clip();
+  g.drawImage(drawBallSkin(k), 0, 0, 128, 128, 0, 0, 64, 64);
+  const grd = g.createRadialGradient(22, 20, 4, 32, 32, 34);
+  grd.addColorStop(0, 'rgba(255,255,255,0.35)');
+  grd.addColorStop(1, 'rgba(0,0,0,0.35)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  g.restore();
+}
+
+function renderTeams() {
+  const teams = state.me?.teams || [];
+  $('#teamsBody').innerHTML = `
+    <h2>👥 Meus times (duplas)</h2>
+    <p class="muted small">Crie uma dupla e passe o código para o seu parceiro entrar. Times com alguém na sala podem disputar campeonatos.</p>
+    ${
+      teams.length
+        ? teams
+            .map(
+              (t) => `<div class="team-card" style="border-color:${t.color}"><div><b style="color:${t.color}">${esc(t.name)}</b> · código <span class="code">${esc(t.code)}</span><br/>
+        <span class="small">${t.members.map((m) => esc(m.name)).join(' & ')}${t.members.length < 2 ? ' <span class="muted">(falta o parceiro)</span>' : ''}</span><br/>
+        <span class="muted small">🏆 ${t.titles} títulos · ${t.wins}/${t.games} vitórias</span></div><button class="ghost" data-leave="${t.id}">Sair</button></div>`,
+            )
+            .join('')
+        : '<p class="muted">Você ainda não tem time.</p>'
+    }
+    <div class="join-row"><input id="teamName" maxlength="20" placeholder="Nome do novo time" /><button class="primary" id="teamCreate">Criar</button></div>
+    <div class="join-row"><input id="teamCode" maxlength="5" placeholder="CÓDIGO" /><button id="teamJoin">Entrar no time</button></div>
+    <button class="ghost" data-close>Fechar</button>`;
+  const body = $('#teamsBody');
+  body.querySelectorAll('[data-leave]').forEach((b) => (b.onclick = () => confirm('Sair desse time?') && send({ t: 'teamLeave', id: b.dataset.leave })));
+  $('#teamCreate').onclick = () => {
+    const name = $('#teamName').value.trim();
+    if (name) send({ t: 'teamCreate', name });
+  };
+  $('#teamJoin').onclick = () => send({ t: 'teamJoin', code: $('#teamCode').value });
+  body.querySelector('[data-close]').onclick = () => $('#teamsBox').classList.add('hidden');
+}
+
+function renderRanking(r) {
+  const medals = ['🥇', '🥈', '🥉'];
+  $('#rankBody').innerHTML = `
+    <h2>🏆 Ranking</h2>
+    <div class="rank-grid">
+      <div><h3>Times</h3><ol>${r.teams.map((t) => `<li><b style="color:${t.color}">${esc(t.name)}</b> — ${t.titles} 🏆 · ${t.wins} vitórias</li>`).join('') || '<li class="muted">—</li>'}</ol></div>
+      <div><h3>Jogadores</h3><ol>${r.players.map((p) => `<li>${esc(p.name)} — ${p.titles} 🏆 · ${p.wins}/${p.games}</li>`).join('') || '<li class="muted">—</li>'}</ol></div>
+    </div>
+    <h3>Últimos campeonatos</h3>
+    <ul>${r.championships.map((c) => `<li>${new Date(c.at).toLocaleDateString(undefined)}: ${c.podium.map((n, i) => `${medals[i]} ${esc(n)}`).join(' ')}</li>`).join('') || '<li class="muted">Nenhum ainda</li>'}</ul>
+    <button class="ghost" data-close>Fechar</button>`;
+  $('#rankBody [data-close]').onclick = () => $('#rankBox').classList.add('hidden');
+  openModal('#rankBox');
+}
+
+// Championship table (lobby side panel and end-of-match modal).
+function champHtml(c) {
+  const medals = ['🥇', '🥈', '🥉'];
+  const rows = c.table
+    .map(
+      (r, i) =>
+        `<tr><td>${c.done && i < 3 ? medals[i] : i + 1}</td><td><b style="color:${r.color}">${esc(r.name)}</b></td><td>${r.p}</td><td>${r.w}</td><td>${r.l}</td><td>${r.pf - r.pa}</td></tr>`,
+    )
+    .join('');
+  const games = c.matches
+    .map((m, i) => {
+      const A = c.teams[m.a];
+      const B = c.teams[m.b];
+      const res = m.r ? `${m.r.sa} × ${m.r.sb}` : i === c.idx && !c.done ? '<b>agora</b>' : 'vs';
+      return `<li>${esc(A.name)} ${res} ${esc(B.name)}</li>`;
+    })
+    .join('');
+  return `<table class="champ-table"><tr><th>#</th><th>Time</th><th>Pts</th><th>V</th><th>D</th><th>Saldo</th></tr>${rows}</table><ul class="champ-games">${games}</ul>`;
 }
 
 // ------------------------------------------------------------------ voice chat UI
@@ -739,6 +983,10 @@ function setupInput() {
       case 'KeyB':
         if (voice.on) voice.toggleMute();
         break;
+      case 'KeyG':
+        if (state.room?.members.find((m) => m.id === state.myId)?.powers.includes('danca')) send({ t: 'dance' });
+        else toast('Compre a Dancinha na loja para dançar 💃');
+        break;
       case 'KeyM':
         setMuted(!isMuted());
         toast(isMuted() ? 'Som desligado' : 'Som ligado');
@@ -886,7 +1134,7 @@ function renderHud(s) {
   }
   const r = state.room.rules;
   const team = (t) =>
-    `<div class="sb-team" style="border-color:${TEAM_COLORS[t]}"><div class="tag" style="color:${TEAM_COLORS[t]}">TIME ${TEAM_NAMES[t].toUpperCase()} · ${
+    `<div class="sb-team" style="border-color:${tColor(t)}"><div class="tag" style="color:${tColor(t)}">TIME ${tName(t).toUpperCase()} · ${
       s.bt === t ? '🏏 NO TACO' : '⚾ NA BOLA'
     }</div><div class="score">${s.sc[t]}</div><div class="names">${esc(teamNames(t))}</div></div>`;
   const dots = (n, lim) => Array.from({ length: lim }, (_, i) => `<span class="${i < n ? 'on' : ''}"></span>`).join('');
@@ -943,12 +1191,22 @@ function renderHud(s) {
   // Game over
   const ob = $('#overBox');
   if (s.ph === 'gameover' && s.win) {
-    if (ob.classList.contains('hidden')) {
+    const champ = state.room.champ;
+    const sig = JSON.stringify([s.win, champ?.idx, champ?.done, champ?.table]);
+    if (ob.classList.contains('hidden') || ob.dataset.sig !== sig) {
+      ob.dataset.sig = sig;
       ob.classList.remove('hidden');
-      ob.innerHTML = `<div class="modal-card"><h2 style="color:${TEAM_COLORS[s.win.team]}">🏆 Time ${TEAM_NAMES[s.win.team]} venceu!</h2><p>${esc(
+      const next = champ ? (champ.done ? 'Encerrar e voltar para a sala' : 'Próxima partida do campeonato') : 'Voltar para a sala';
+      const podium = champ?.done
+        ? `<div class="podium">${champ.table
+            .slice(0, 3)
+            .map((r, i) => `<div class="p${i + 1}" style="border-color:${r.color}"><span>${['🥇', '🥈', '🥉'][i]}</span><b>${esc(r.name)}</b><small>+${REWARDS.champ[i]} 🪙</small></div>`)
+            .join('')}</div>`
+        : '';
+      ob.innerHTML = `<div class="modal-card ${champ ? 'wide' : ''}"><h2 style="color:${tColor(s.win.team)}">🏆 ${esc(tName(s.win.team))} venceu!</h2><p>${esc(
         s.win.text,
-      )}</p><p><b>${s.sc[0]}</b> × <b>${s.sc[1]}</b></p>${
-        isHost() ? '<button class="primary" id="againBtn">Voltar para a sala</button>' : '<p class="muted">Aguardando o anfitrião...</p>'
+      )}</p><p><b>${s.sc[0]}</b> × <b>${s.sc[1]}</b></p>${champ ? `${podium}${champHtml(champ)}` : ''}<p class="muted small">Dancinha comprada? Aperte <kbd>G</kbd> para comemorar.</p>${
+        isHost() ? `<button class="primary" id="againBtn">${next}</button>` : '<p class="muted">Aguardando o anfitrião...</p>'
       } <button id="quitBtn">Sair</button></div>`;
       $('#againBtn')?.addEventListener('click', () => send({ t: 'again' }));
       $('#quitBtn').onclick = () => send({ t: 'leave' });
@@ -986,30 +1244,30 @@ function renderDecide(s) {
   let html = '';
   decideKeyHandler = null;
   if (d.method === 'molhado') {
-    html = `<h2>💧 Molhado ou seco?</h2><p>Um lado do taco foi molhado. O capitão do Time ${TEAM_NAMES[0]} escolhe e o taco é jogado para cima.</p>`;
+    html = `<h2>💧 Molhado ou seco?</h2><p>Um lado do taco foi molhado. O capitão do Time ${tName(0)} escolhe e o taco é jogado para cima.</p>`;
     if (d.stage === 'choose') {
       html +=
         d.captains[0] === me
           ? `<div class="choices"><button class="primary" data-c="molhado">💧 Molhado</button><button class="primary" data-c="seco">☀️ Seco</button></div>`
           : `<p class="muted">Aguardando ${esc(capName(0))} escolher...</p>`;
-    } else if (d.stage === 'flip') html += `<p style="font-size:3rem;animation:spin 0.4s linear infinite">🏏</p><p>Time ${TEAM_NAMES[0]} escolheu <b>${d.choice}</b>. Taco no ar...</p>`;
-    else html += `<p>Caiu <b>${d.result}</b>! Time <b>${TEAM_NAMES[d.winner]}</b> começa no taco.</p>`;
+    } else if (d.stage === 'flip') html += `<p style="font-size:3rem;animation:spin 0.4s linear infinite">🏏</p><p>Time ${tName(0)} escolheu <b>${d.choice}</b>. Taco no ar...</p>`;
+    else html += `<p>Caiu <b>${d.result}</b>! Time <b>${tName(d.winner)}</b> começa no taco.</p>`;
   } else if (d.method === 'parimpar') {
     html = `<h2>✋ Par ou ímpar</h2>`;
     if (d.stage === 'choose') {
       const myTeam = d.captains.indexOf(me);
       if (myTeam === 0 && d.numA == null)
-        html += `<p>Você é o capitão do Time ${TEAM_NAMES[0]}. Escolha:</p><div class="choices"><button data-par="par" class="${
+        html += `<p>Você é o capitão do Time ${tName(0)}. Escolha:</p><div class="choices"><button data-par="par" class="${
           (pendingParity || 'par') === 'par' ? 'sel' : ''
         }">Par</button><button data-par="impar" class="${pendingParity === 'impar' ? 'sel' : ''}">Ímpar</button></div><p>e quantos dedos:</p><div class="choices">${[0, 1, 2, 3, 4, 5]
           .map((n) => `<button class="primary" data-n="${n}">${n}</button>`)
           .join('')}</div>`;
       else if (myTeam === 1 && d.numB == null)
-        html += `<p>Você é o capitão do Time ${TEAM_NAMES[1]}. Quantos dedos?</p><div class="choices">${[0, 1, 2, 3, 4, 5]
+        html += `<p>Você é o capitão do Time ${tName(1)}. Quantos dedos?</p><div class="choices">${[0, 1, 2, 3, 4, 5]
           .map((n) => `<button class="primary" data-n="${n}">${n}</button>`)
           .join('')}</div>`;
       else html += `<p class="muted">Aguardando ${esc(capName(0))} e ${esc(capName(1))}...</p>`;
-    } else html += `<p style="font-size:1.5rem">${d.numA} + ${d.numB} = <b>${d.sum}</b></p><p>Time ${TEAM_NAMES[0]} pediu <b>${d.parity === 'par' ? 'par' : 'ímpar'}</b>. Time <b>${TEAM_NAMES[d.winner]}</b> começa no taco.</p>`;
+    } else html += `<p style="font-size:1.5rem">${d.numA} + ${d.numB} = <b>${d.sum}</b></p><p>Time ${tName(0)} pediu <b>${d.parity === 'par' ? 'par' : 'ímpar'}</b>. Time <b>${tName(d.winner)}</b> começa no taco.</p>`;
   } else if (d.method === 'palmo') {
     html = `<h2>🖐 Último palmo</h2><p class="muted">Os capitães vão fechando a mão no taco, uma em cima da outra. Quem segurar por último precisa balançar o taco como pêndulo por 10 segundos.</p>`;
     let y = 0;
@@ -1017,7 +1275,7 @@ function renderDecide(s) {
       .map((h) => {
         const top = 260 - ((y + h.w) / d.length) * 260;
         y += h.w;
-        return `<div class="palmo-hand" style="top:${top}px;height:${(h.w / d.length) * 260 - 2}px;background:${TEAM_COLORS[h.team]}">${TEAM_NAMES[h.team]}</div>`;
+        return `<div class="palmo-hand" style="top:${top}px;height:${(h.w / d.length) * 260 - 2}px;background:${tColor(h.team)}">${tName(h.team)}</div>`;
       })
       .join('');
     if (d.stage !== 'balance' || d.captains[d.holder] !== me) html += `<div class="palmo-bat">${hands}</div>`;
@@ -1036,8 +1294,8 @@ function renderDecide(s) {
       if (d.captains[d.holder] === me) {
         html += `<p><b>Equilibre o taco!</b> Use <kbd>A</kbd>/<kbd>D</kbd> ou o mouse por 10 segundos.</p><div class="balance"><canvas id="balanceCanvas" width="300" height="220"></canvas></div>`;
       } else html += `<p>${esc(capName(d.holder))} está equilibrando o taco...</p>`;
-    } else html += `<p>${d.success ? 'Equilibrou!' : 'Deixou cair!'} Time <b>${TEAM_NAMES[d.winner]}</b> começa no taco.</p>`;
-  } else html = `<h2>🎲 Sorteio</h2><p>Time <b>${TEAM_NAMES[d.winner]}</b> começa no taco.</p>`;
+    } else html += `<p>${d.success ? 'Equilibrou!' : 'Deixou cair!'} Time <b>${tName(d.winner)}</b> começa no taco.</p>`;
+  } else html = `<h2>🎲 Sorteio</h2><p>Time <b>${tName(d.winner)}</b> começa no taco.</p>`;
 
   box.innerHTML = `<div class="modal-card">${html}</div>`;
   box.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => send({ t: 'decide', choice: b.dataset.c })));

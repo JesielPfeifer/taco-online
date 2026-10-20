@@ -142,6 +142,46 @@ export function drawBallSkin(skin) {
       g.stroke();
       noise(g, W, H, 'rgba(0,0,0,0.12)', 1200);
       break;
+    case 'ouro': {
+      const grd = g.createLinearGradient(0, 0, W, H);
+      grd.addColorStop(0, '#fff3a0');
+      grd.addColorStop(0.35, '#e6b422');
+      grd.addColorStop(0.6, '#a87900');
+      grd.addColorStop(1, '#ffe066');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, W, H);
+      g.strokeStyle = 'rgba(255,255,255,0.7)';
+      g.lineWidth = 3;
+      g.beginPath();
+      for (let x = 0; x <= W; x += 4) g.lineTo(x, H / 2 + Math.sin((x / W) * Math.PI * 4) * 30);
+      g.stroke();
+      break;
+    }
+    case 'galaxia': {
+      const grd = g.createLinearGradient(0, 0, W, 0);
+      grd.addColorStop(0, '#1a0b3d');
+      grd.addColorStop(0.5, '#4c1d95');
+      grd.addColorStop(1, '#0b1a3d');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, W, H);
+      for (let i = 0; i < 6; i++) {
+        const neb = g.createRadialGradient((i * 47) % W, (i * 31) % H, 2, (i * 47) % W, (i * 31) % H, 30);
+        neb.addColorStop(0, 'rgba(236,72,153,0.6)');
+        neb.addColorStop(1, 'rgba(236,72,153,0)');
+        g.fillStyle = neb;
+        g.fillRect(0, 0, W, H);
+      }
+      noise(g, W, H, '#ffffff', 160);
+      break;
+    }
+    case 'arcoiris': {
+      const cols = ['#ef4444', '#f97316', '#facc15', '#22c55e', '#3b82f6', '#6366f1', '#a855f7'];
+      cols.forEach((col, i) => {
+        g.fillStyle = col;
+        g.fillRect(0, (i * H) / cols.length, W, H / cols.length + 1);
+      });
+      break;
+    }
     default:
       fill('#ffffff');
   }
@@ -149,7 +189,7 @@ export function drawBallSkin(skin) {
   return c;
 }
 
-export const GLOWING_BALLS = new Set(['neon', 'fogo']);
+export const GLOWING_BALLS = new Set(['neon', 'fogo', 'galaxia', 'arcoiris']);
 
 function noise(g, w, h, col, n) {
   g.fillStyle = col;
@@ -263,7 +303,7 @@ export function drawBat(style) {
   if (cache.has(key)) return cache.get(key);
   const c = canvas(32, 128);
   const g = c.getContext('2d');
-  const base = ['#c8955a', '#6b4226', '#1f9d3a', '#e8e8e8', '#222222', '#ff3ea5', '#55613a'][style] || '#c8955a';
+  const base = ['#c8955a', '#6b4226', '#1f9d3a', '#e8e8e8', '#222222', '#ff3ea5', '#55613a', '#e6b422', '#111827'][style] || '#c8955a';
   g.fillStyle = base;
   g.fillRect(0, 0, 32, 128);
   if (style === 0 || style === 1) {
@@ -280,6 +320,19 @@ export function drawBat(style) {
   } else if (style === 3) {
     g.fillStyle = '#d62828';
     for (let y = 0; y < 128; y += 16) g.fillRect(0, y, 32, 8);
+  } else if (style === 7) {
+    const grd = g.createLinearGradient(0, 0, 32, 0);
+    grd.addColorStop(0, '#a87900');
+    grd.addColorStop(0.5, '#fff3a0');
+    grd.addColorStop(1, '#a87900');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 32, 128);
+  } else if (style === 8) {
+    g.strokeStyle = '#00f0ff';
+    g.lineWidth = 3;
+    g.strokeRect(3, 3, 26, 96);
+    g.fillStyle = '#ff2fd6';
+    for (let y = 10; y < 96; y += 18) g.fillRect(8, y, 16, 4);
   } else if (style === 6) {
     for (let i = 0; i < 30; i++) {
       g.fillStyle = ['#3a4a2a', '#7a6a3a', '#2a3020'][i % 3];

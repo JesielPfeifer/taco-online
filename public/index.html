@@ -30,7 +30,12 @@
           <div id="customizer" class="customizer"></div>
         </div>
         <div class="panel">
-          <h2>Jogar</h2>
+          <div class="shop-head"><h2>Jogar</h2><span class="wallet big-wallet">🪙 …</span></div>
+          <div class="menu-buttons">
+            <button data-open-shop>🛒 Loja</button>
+            <button data-open-teams>👥 Meus times</button>
+            <button data-open-rank>🏆 Ranking</button>
+          </div>
           <button id="createRoom" class="primary big">Criar sala</button>
           <div class="join-row">
             <input id="joinCode" maxlength="4" placeholder="CÓDIGO" />
@@ -51,7 +56,12 @@
       <div class="lobby-head">
         <button id="leaveLobby" class="ghost">← Sair</button>
         <h2>Sala <span id="roomCode" class="code"></span></h2>
-        <button id="copyLink" class="ghost">Copiar link</button>
+        <div class="menu-buttons">
+          <span class="wallet">🪙 …</span>
+          <button data-open-shop class="ghost">🛒 Loja</button>
+          <button data-open-teams class="ghost">👥 Times</button>
+          <button id="copyLink" class="ghost">Copiar link</button>
+        </div>
       </div>
       <div class="lobby-grid">
         <div class="panel">
@@ -62,6 +72,7 @@
           <div id="spectators" class="muted small">—</div>
           <button id="startGame" class="primary big">Começar partida</button>
           <p id="hostHint" class="muted small"></p>
+          <div id="champPanel"></div>
         </div>
         <div class="panel">
           <h3>Regras (o anfitrião escolhe)</h3>
@@ -105,6 +116,9 @@
       <div id="helpBox" class="modal hidden"><div class="modal-card wide"><div id="helpGame"></div><button class="primary" data-close-help>Fechar (H)</button></div></div>
     </section>
 
+    <div id="shopBox" class="modal fixed hidden"><div class="modal-card wide" id="shopBody"></div></div>
+    <div id="teamsBox" class="modal fixed hidden"><div class="modal-card wide" id="teamsBody"></div></div>
+    <div id="rankBox" class="modal fixed hidden"><div class="modal-card wide" id="rankBody"></div></div>
     <div id="toast"></div>
     <script type="module" src="/js/main.js"></script>
   </body>

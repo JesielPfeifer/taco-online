@@ -49,6 +49,8 @@ então ganham pontos extras pela interrupção (ou a vitória, se combinado).</l
 <li><b>Tempo</b> ("licença betes", "tempo-para-dois"): pausa até 100s; pode custar "uma pra trás".
 Quem sumir sem pedir tempo vira <b>bete morto</b> e a casinha dele pode ser derrubada.</li>
 <li><b>Na pontuação máxima</b>, perder o taco pode derrubar os pontos pela metade.</li>
+<li><b>Moedas e loja</b>: vitória +50, derrota +15. Campeonato: 1º +500, 2º +300, 3º +150 por jogador.
+Na loja tem bolinhas, tacos e chapéus premium e poderes (corrida prolongada, mira quase perfeita, dancinha com <kbd>G</kbd>).</li>
 <li><b>Final paulista</b> (opcional): ao cruzar na máxima, os rebatedores ficam de pé sobre os tacos e os lançadores têm um
 arremesso de onde pegarem a bola: acertou, os rebatedores perdem metade da meta e seguem; errou, perderam o jogo.</li>
 </ul>

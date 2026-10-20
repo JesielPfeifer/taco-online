@@ -703,3 +703,137 @@ kbd {
 #toast.show {
   opacity: 1;
 }
+
+/* wallet, shop, teams, championship */
+.modal.fixed {
+  position: fixed;
+  z-index: 5;
+}
+.shop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.menu-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.wallet {
+  font-weight: 800;
+  color: var(--accent);
+}
+.big-wallet {
+  font-size: 1.3rem;
+}
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.shop-item {
+  background: var(--panel2);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.shop-item canvas {
+  width: 56px;
+  height: 56px;
+}
+.shop-icon {
+  font-size: 2.2rem;
+}
+.ok {
+  color: var(--ok);
+  font-weight: 700;
+}
+.buy-inline {
+  width: 100%;
+  margin-top: 4px;
+  padding: 3px;
+  font-size: 0.8rem;
+}
+.ball-skin.locked {
+  opacity: 0.75;
+}
+.team-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-left: 5px solid;
+  background: var(--panel2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.rank-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.champ-pick {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0;
+  flex-wrap: wrap;
+}
+.champ-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin: 8px 0;
+}
+.champ-table th,
+.champ-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #2a3f31;
+  text-align: center;
+}
+.champ-table td:nth-child(2) {
+  text-align: left;
+}
+.champ-games {
+  font-size: 0.82rem;
+  padding-left: 18px;
+  text-align: left;
+}
+.podium {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 10px 0;
+}
+.podium div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--panel2);
+  border-top: 5px solid;
+  border-radius: 10px;
+  padding: 8px 12px;
+  min-width: 110px;
+}
+.podium span {
+  font-size: 1.8rem;
+}
+.podium .p1 {
+  order: 2;
+  padding-bottom: 34px;
+}
+.podium .p2 {
+  order: 1;
+  padding-bottom: 18px;
+}
+.podium .p3 {
+  order: 3;
+}

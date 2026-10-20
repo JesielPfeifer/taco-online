@@ -12,6 +12,8 @@ export const BASE_R = 0.9; // base circle radius (players stand inside it)
 export const TARGET_R = 0.22; // tripod ("casinha") collision radius
 export const TARGET_H = 0.8;
 export const BALL_R = 0.07;
+// The pitching line sits behind the base circle: pitches only count from beyond it.
+export const PITCH_LINE = BASE_R + 0.3;
 export const MID_ZONE = 1.8; // |z| below this counts as the middle of the field
 export const PLAYER_R = 0.32;
 
@@ -113,6 +115,23 @@ export const RULE_DEFS = {
       [true, 'Sim'],
     ],
   },
+  scenario: {
+    label: 'Cenário',
+    options: [
+      ['campinho', 'Campinho de grama'],
+      ['rua', 'Rua de bairro'],
+      ['sitio', 'Sítio'],
+      ['mercado', 'Estacionamento do mercado'],
+      ['praia', 'Praia'],
+    ],
+  },
+  powers: {
+    label: 'Poderes comprados na loja',
+    options: [
+      [true, 'Liberados'],
+      [false, 'Desligados (jogo limpo)'],
+    ],
+  },
   finalMode: {
     label: 'Final do jogo',
     options: [
@@ -136,6 +155,8 @@ export const DEFAULT_RULES = {
   patioBonus: 'corrida',
   tempoPenalty: false,
   finalMode: 'cruzar',
+  scenario: 'campinho',
+  powers: true,
 };
 
 export function sanitizeRules(input) {
@@ -187,6 +208,8 @@ export const AVATAR_PARTS = {
       'Bandana',
       'Chapéu de cowboy',
       'Bucket',
+      'Coroa',
+      'Cartola',
     ],
   },
   hatColor: {
@@ -234,7 +257,7 @@ export const AVATAR_PARTS = {
   },
   bat: {
     label: 'Taco',
-    options: ['Madeira', 'Madeira escura', 'Verde e amarelo', 'Listrado', 'Preto fosco', 'Rosa choque', 'Camuflado'],
+    options: ['Madeira', 'Madeira escura', 'Verde e amarelo', 'Listrado', 'Preto fosco', 'Rosa choque', 'Camuflado', 'Dourado', 'Neon'],
   },
 };
 
@@ -267,15 +290,45 @@ export function randomAvatar() {
   return a;
 }
 
-export function sanitizeAvatar(input) {
+// owned: list of purchased item ids; premium parts not owned fall back to the default.
+export function sanitizeAvatar(input, owned = null) {
   const out = defaultAvatar();
   if (!input || typeof input !== 'object') return out;
   for (const [k, def] of Object.entries(AVATAR_PARTS)) {
     const v = Number(input[k]);
-    if (Number.isInteger(v) && v >= 0 && v < def.options.length) out[k] = v;
+    if (!Number.isInteger(v) || v < 0 || v >= def.options.length) continue;
+    if (owned && PREMIUM[k]?.[v] && !owned.includes(`${k}:${v}`)) continue;
+    out[k] = v;
   }
   return out;
 }
+
+// ---------------------------------------------------------------- shop
+// Prices in coins (🪙). Items not listed here are free.
+export const PREMIUM = {
+  ball: { neon: 150, melancia: 120, fogo: 250, basquete: 100, ouro: 400, galaxia: 350, arcoiris: 200 },
+  bat: { 5: 80, 6: 120, 7: 300, 8: 200 },
+  hat: { 10: 300, 11: 150 },
+};
+
+export const POWERS = [
+  { id: 'folego', name: 'Corrida prolongada', desc: 'O fôlego dura o dobro e recupera mais rápido.', price: 250 },
+  { id: 'mira', name: 'Mira quase perfeita', desc: 'Lançamentos e rebatidas quase sem desvio.', price: 400 },
+  { id: 'danca', name: 'Dancinha', desc: 'Tecla G: solta uma dancinha no meio da partida.', price: 100 },
+];
+
+export function itemPrice(id) {
+  const [kind, val] = String(id).split(':');
+  if (kind === 'power') return POWERS.find((p) => p.id === val)?.price ?? null;
+  return PREMIUM[kind]?.[val] ?? null;
+}
+
+export function ownsBall(skin, owned) {
+  return !PREMIUM.ball[skin] || owned.includes(`ball:${skin}`);
+}
+
+// Coins paid at the end of matches and championships (per human player).
+export const REWARDS = { win: 50, loss: 15, champ: [500, 300, 150] };
 
 export const BALL_SKINS = [
   ['tenis', 'Bola de tênis'],
@@ -288,6 +341,9 @@ export const BALL_SKINS = [
   ['fogo', 'Fogo'],
   ['beisebol', 'Beisebol'],
   ['basquete', 'Basquete'],
+  ['ouro', 'Bola de ouro'],
+  ['galaxia', 'Galáxia'],
+  ['arcoiris', 'Arco-íris'],
 ];
 
 export const TEAM_NAMES = ['Azul', 'Vermelho'];

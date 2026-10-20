@@ -5,6 +5,7 @@ import {
   TARGET_H,
   BALL_R,
   MID_ZONE,
+  PITCH_LINE,
   PLAYER_R,
   BALL_SKINS,
   TEAM_NAMES,
@@ -12,12 +13,18 @@ import {
   sanitizeAvatar,
   randomAvatar,
   DEFAULT_RULES,
+  ownsBall,
+  REWARDS,
+  TEAM_COLORS,
 } from '../shared/config.js';
 import { botThink, botDecide } from './bots.js';
 
 const DT = 1 / 60;
 const G = 9.8;
 const BOT_NAMES = ['Zeca', 'Tião', 'Juju', 'Dona Cida', 'Biel', 'Neném', 'Bia', 'Toninho', 'Lelê', 'Chico', 'Tatá', 'Nando'];
+
+// Rolling friction per scenario ground: asphalt rolls far, sand stops the ball fast.
+const ROLL_FRICTION = { campinho: 2.6, rua: 1.7, sitio: 3.2, mercado: 1.6, praia: 5.5 };
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const hyp = (x, z) => Math.sqrt(x * x + z * z);
@@ -84,7 +91,13 @@ export class Room {
         bot: m.bot,
         voice: !!(m.voice && m.client),
         muted: !!m.muted,
+        pub: m.pub || null,
+        powers: m.powers || [],
       })),
+      teamLabels: this.teamLabels || null,
+      teamColors: this.teamColors || null,
+      champ: this.champView(),
+      teams: this.availableTeams(),
     };
   }
 
@@ -94,7 +107,15 @@ export class Room {
 
   join(client) {
     if (this.humans().length >= 12) return client.send({ t: 'err', msg: 'Sala cheia' });
-    this.members.set(client.id, { id: client.id, name: client.name, avatar: client.avatar, client, bot: false });
+    this.members.set(client.id, {
+      id: client.id,
+      name: client.name,
+      avatar: client.avatar,
+      client,
+      bot: false,
+      pub: client.pub,
+      powers: this.lobby.powers?.(client) || [],
+    });
     client.room = this;
     if (!this.hostId || !this.members.get(this.hostId)?.client) this.hostId = client.id;
     if (this.phase === 'lobby') {
@@ -146,6 +167,8 @@ export class Room {
     if (!m) return;
     m.name = client.name;
     m.avatar = client.avatar;
+    m.pub = client.pub;
+    m.powers = this.lobby.powers?.(client) || [];
     const p = this.players?.get(client.id);
     if (p) p.name = m.name;
     this.broadcastRoom();
@@ -172,7 +195,7 @@ export class Room {
     const host = this.isHost(client);
     switch (msg.t) {
       case 'seat': {
-        if (this.phase !== 'lobby') return;
+        if (this.phase !== 'lobby' || this.champ) return;
         const t = Number(msg.team);
         const s = Number(msg.slot);
         if (![0, 1].includes(t) || ![0, 1].includes(s)) return;
@@ -205,13 +228,36 @@ export class Room {
         return this.broadcastRoom();
       case 'ballSkin':
         if (!host) return;
-        if (BALL_SKINS.some(([k]) => k === msg.skin)) this.ballSkin = msg.skin;
+        if (!BALL_SKINS.some(([k]) => k === msg.skin)) return;
+        if (!ownsBall(msg.skin, this.lobby.owned?.(client) || [])) return client.send({ t: 'err', msg: 'Compre essa bolinha na loja primeiro' });
+        this.ballSkin = msg.skin;
         return this.broadcastRoom();
+      case 'champStart':
+        if (!host || this.phase !== 'lobby') return;
+        return this.champStart(msg.teamIds);
+      case 'champNext':
+        if (!host || this.phase !== 'gameover' || !this.champ) return;
+        return this.champNext();
+      case 'champCancel':
+        if (!host || !this.champ) return;
+        this.champ = null;
+        this.teamLabels = this.teamColors = null;
+        if (this.phase === 'gameover') return this.backToLobby();
+        return this.broadcastRoom();
+      case 'dance': {
+        const p = this.players?.get(client.id);
+        if (!p || !p.powers.includes('danca') || !['playing', 'intro', 'swap', 'gameover'].includes(this.phase)) return;
+        if (this.ball?.holder === p.id || p.swingT >= 0) return;
+        p.danceUntil = this.time + 3.2;
+        this.ev({ k: 'dance', id: p.id });
+        return;
+      }
       case 'start':
         if (!host || this.phase !== 'lobby') return;
         return this.startGame();
       case 'again':
         if (!host || this.phase !== 'gameover') return;
+        if (this.champ) return this.champNext();
         return this.backToLobby();
       case 'chat': {
         const text = String(msg.text || '')
@@ -314,6 +360,8 @@ export class Room {
           discAt: 0,
           lastActive: 0,
           ai: {},
+          powers: this.rules.powers ? m.powers || [] : [],
+          danceUntil: 0,
         });
       }
     this.score = [0, 0];
@@ -424,7 +472,7 @@ export class Room {
     this.layoutPlayers();
     this.phase = 'intro';
     this.phaseUntil = this.time + 1.6;
-    this.ev({ k: 'innings', text: text || `Time ${TEAM_NAMES[team]} está com os tacos!` });
+    this.ev({ k: 'innings', text: text || `Time ${this.teamName(team)} está com os tacos!` });
     this.broadcastRoom();
   }
 
@@ -442,7 +490,7 @@ export class Room {
     if (method === 'aleatorio') {
       const w = Math.random() < 0.5 ? 0 : 1;
       this.decide = { method, stage: 'done', winner: w, captains, until: this.time + 2.5 };
-      this.ev({ k: 'msg', text: `Sorteio: Time ${TEAM_NAMES[w]} começa no taco` });
+      this.ev({ k: 'msg', text: `Sorteio: Time ${this.teamName(w)} começa no taco` });
     } else if (method === 'molhado') {
       this.decide = { method, stage: 'choose', captains, choice: null, result: null, until: this.time + 20 };
     } else if (method === 'parimpar') {
@@ -492,7 +540,7 @@ export class Room {
     d.winner = d.result === choice ? 0 : 1;
     d.stage = 'flip';
     d.until = this.time + 3;
-    this.ev({ k: 'msg', text: `Time ${TEAM_NAMES[0]} escolheu ${choice}. Taco para cima...` });
+    this.ev({ k: 'msg', text: `Time ${this.teamName(0)} escolheu ${choice}. Taco para cima...` });
   }
 
   parImparCheck() {
@@ -503,7 +551,7 @@ export class Room {
     d.winner = (d.parity === 'par') === even ? 0 : 1;
     d.stage = 'done';
     d.until = this.time + 3.5;
-    this.ev({ k: 'msg', text: `${d.numA} + ${d.numB} = ${d.sum} (${even ? 'par' : 'ímpar'}): Time ${TEAM_NAMES[d.winner]} começa no taco` });
+    this.ev({ k: 'msg', text: `${d.numA} + ${d.numB} = ${d.sum} (${even ? 'par' : 'ímpar'}): Time ${this.teamName(d.winner)} começa no taco` });
   }
 
   palmoHand() {
@@ -517,7 +565,7 @@ export class Room {
     if (d.remaining < 8) {
       d.stage = 'balance';
       d.until = this.time + 18;
-      this.ev({ k: 'msg', text: `Último palmo do Time ${TEAM_NAMES[d.holder]}! Equilibre o taco por 10 segundos.` });
+      this.ev({ k: 'msg', text: `Último palmo do Time ${this.teamName(d.holder)}! Equilibre o taco por 10 segundos.` });
     }
   }
 
@@ -529,7 +577,7 @@ export class Room {
     d.until = this.time + 3;
     this.ev({
       k: 'msg',
-      text: ok ? `Equilibrou! Time ${TEAM_NAMES[d.winner]} começa no taco` : `Deixou cair! Time ${TEAM_NAMES[d.winner]} começa no taco`,
+      text: ok ? `Equilibrou! Time ${this.teamName(d.winner)} começa no taco` : `Deixou cair! Time ${this.teamName(d.winner)} começa no taco`,
     });
   }
 
@@ -543,7 +591,7 @@ export class Room {
       else {
         d.stage = 'done';
         d.until = this.time + 2;
-        this.ev({ k: 'msg', text: `Caiu ${d.result}! Time ${TEAM_NAMES[d.winner]} começa no taco` });
+        this.ev({ k: 'msg', text: `Caiu ${d.result}! Time ${this.teamName(d.winner)} começa no taco` });
       }
     } else if (d.method === 'parimpar') {
       if (d.numA == null) {
@@ -659,10 +707,12 @@ export class Room {
         mz /= len;
       }
       let speed = 5.2;
+      const folego = p.powers?.includes('folego');
       if (p.input.sp && p.stamina > 0.05 && len > 0.1) {
         speed = 7.6;
-        p.stamina = Math.max(0, p.stamina - dt * 0.33);
-      } else p.stamina = Math.min(1, p.stamina + dt * 0.18);
+        p.stamina = Math.max(0, p.stamina - dt * (folego ? 0.16 : 0.33));
+      } else p.stamina = Math.min(1, p.stamina + dt * (folego ? 0.3 : 0.18));
+      if (len > 0.2 && p.danceUntil > this.time) p.danceUntil = 0; // moving stops the dance
       if (Math.abs(p.x) > FIELD.halfW || Math.abs(p.z) > FIELD.halfL) speed *= 0.5; // mato
       if (p.swingT >= 0) speed *= 0.35;
       if (p.dead || (!free && p.frozen)) speed = 0;
@@ -716,7 +766,7 @@ export class Room {
   }
 
   isBehind(p, k) {
-    return this.sgn(k) * p.z >= Math.abs(this.zb(k)) + 0.4 && Math.abs(p.x) < 6;
+    return this.sgn(k) * p.z >= Math.abs(this.zb(k)) + PITCH_LINE && Math.abs(p.x) < 6;
   }
 
   // A base is "protected" while a batter keeps the bat on the ground inside it
@@ -820,7 +870,8 @@ export class Room {
     p.charging = false;
     p.frozen = false;
     p.frozenUntil = 0;
-    const noise = (Math.random() - 0.5) * (0.025 + power * 0.07);
+    const aimPower = p.powers?.includes('mira') ? 0.2 : 1;
+    const noise = (Math.random() - 0.5) * (0.025 + power * 0.07) * aimPower;
     const c = Math.cos(noise);
     const s = Math.sin(noise);
     const ndx = dx * c - dz * s;
@@ -869,7 +920,7 @@ export class Room {
     const bt = this.battingTeam;
     if (this.score[bt] >= this.rules.targetScore) {
       if (this.rules.finalMode === 'paulista') return this.enterFinal();
-      return this.win(bt, `Time ${TEAM_NAMES[bt]} cruzou os tacos com ${this.score[bt]} pontos!`);
+      return this.win(bt, `Time ${this.teamName(bt)} cruzou os tacos com ${this.score[bt]} pontos!`);
     }
     a.crossed = b.crossed = true;
     this.runPending = true;
@@ -890,9 +941,9 @@ export class Room {
       this.score[bt] += this.rules.pointsPerRun;
       const desc = this.paraTras ? ` (descontou ${this.paraTras} pra trás)` : '';
       this.paraTras = 0;
-      this.ev({ k: 'point', text: `+${this.rules.pointsPerRun} para o Time ${TEAM_NAMES[bt]}!${desc}` });
+      this.ev({ k: 'point', text: `+${this.rules.pointsPerRun} para o Time ${this.teamName(bt)}!${desc}` });
       if (this.score[bt] >= this.rules.targetScore)
-        this.ev({ k: 'msg', text: `Time ${TEAM_NAMES[bt]} atingiu ${this.score[bt]}! Agora é cruzar os tacos para vencer.` });
+        this.ev({ k: 'msg', text: `Time ${this.teamName(bt)} atingiu ${this.score[bt]}! Agora é cruzar os tacos para vencer.` });
     }
   }
 
@@ -945,10 +996,10 @@ export class Room {
     const ppr = this.rules.pointsPerRun;
     const bonus = this.rules.patioBonus;
     let text = `${p.name}: "PÁTIO! Bolinha perdida!"`;
-    if (bonus === 'vitoria') return this.win(bt, `${text} Vitória do Time ${TEAM_NAMES[bt]}.`);
+    if (bonus === 'vitoria') return this.win(bt, `${text} Vitória do Time ${this.teamName(bt)}.`);
     const add = bonus === 'corrida' ? ppr : bonus === 'duas' ? ppr * 2 : 0;
     this.score[bt] += add;
-    if (add) text += ` Time ${TEAM_NAMES[bt]} ganha +${add} pela interrupção.`;
+    if (add) text += ` Time ${this.teamName(bt)} ganha +${add} pela interrupção.`;
     this.ev({ k: 'call', text });
     this.resetPlay();
   }
@@ -1034,7 +1085,7 @@ export class Room {
         const bt = this.battingTeam;
         this.score[bt] = Math.max(0, this.score[bt] - 4);
         this.lancha = 0;
-        this.ev({ k: 'msg', text: `Três na lancha: Time ${TEAM_NAMES[bt]} perde 4 pontos.` });
+        this.ev({ k: 'msg', text: `Três na lancha: Time ${this.teamName(bt)} perde 4 pontos.` });
       } else if (!this.pendingLose) this.pendingLose = { at: this.time + 0.8, text: 'Três na lancha! Perderam os tacos.' };
     }
   }
@@ -1057,7 +1108,7 @@ export class Room {
     const text = `${f.name} pegou no ar: "VITÓRIA!"`;
     const rule = this.rules.catchRule;
     this.ev({ k: 'vitoria', text });
-    if (rule === 'jogo') return this.win(f.team, `${text} Vitória automática do Time ${TEAM_NAMES[f.team]}.`);
+    if (rule === 'jogo') return this.win(f.team, `${text} Vitória automática do Time ${this.teamName(f.team)}.`);
     if (rule === 'taco2') this.score[f.team] += 2;
     this.loseTacos(rule === 'taco2' ? `${text} Ganharam o taco e +2 pontos.` : `${text} Entreguem os tacos!`);
   }
@@ -1079,7 +1130,7 @@ export class Room {
     this.phase = 'swap';
     this.phaseUntil = this.time + 2.8;
     this.nextBatting = 1 - bt;
-    this.nextText = `Troca! Time ${TEAM_NAMES[1 - bt]} pega os tacos.`;
+    this.nextText = `Troca! Time ${this.teamName(1 - bt)} pega os tacos.`;
     this.pendingLose = null;
     const b = this.ball;
     b.vx *= 0.3;
@@ -1091,7 +1142,170 @@ export class Room {
     this.phase = 'gameover';
     this.winText = text;
     this.ev({ k: 'win', team, text });
+    this.payMatch(team);
+    if (this.champ) this.champRecord(team);
     this.broadcastRoom();
+  }
+
+  // ---------------------------------------------------------------- coins, teams, championship
+  teamName(t) {
+    return this.teamLabels?.[t] || TEAM_NAMES[t];
+  }
+
+  payMatch(winner) {
+    if (!this.lobby.reward) return;
+    for (const t of [0, 1])
+      for (const id of this.seats[t]) {
+        const m = this.members.get(id);
+        if (!m?.pub || m.bot) continue;
+        const won = t === winner;
+        this.lobby.reward(m.pub, won ? REWARDS.win : REWARDS.loss, { game: true, win: won });
+      }
+    this.ev({ k: 'msg', text: `🪙 +${REWARDS.win} para cada vencedor, +${REWARDS.loss} para cada perdedor.` });
+  }
+
+  // Registered teams (duplas) with at least one member connected to this room.
+  availableTeams() {
+    const store = this.lobby.store;
+    if (!store) return [];
+    const seen = new Map();
+    for (const m of this.members.values()) {
+      if (!m.client || !m.pub) continue;
+      for (const t of store.teamsOf(m.pub)) seen.set(t.id, this.lobby.teamView(t));
+    }
+    return [...seen.values()];
+  }
+
+  champStart(teamIds) {
+    const avail = this.availableTeams();
+    const ids = [...new Set(Array.isArray(teamIds) ? teamIds : [])].filter((id) => avail.some((t) => t.id === id)).slice(0, 6);
+    const host = this.members.get(this.hostId)?.client;
+    if (ids.length < 2) return host?.send({ t: 'err', msg: 'Escolha pelo menos 2 times com alguém na sala' });
+    const teams = ids.map((id) => avail.find((t) => t.id === id));
+    // A player can only defend one team in the same championship.
+    const pubs = teams.flatMap((t) => t.members.map((m) => m.pub));
+    if (new Set(pubs).size !== pubs.length) return host?.send({ t: 'err', msg: 'Um jogador está em dois dos times escolhidos' });
+    // Round robin ("todos contra todos"), ordered so a team rarely plays twice in a row.
+    const matches = [];
+    const n = teams.length;
+    const ring = [...Array(n).keys()];
+    if (n % 2) ring.push(-1);
+    const m = ring.length;
+    for (let r = 0; r < m - 1; r++) {
+      for (let i = 0; i < m / 2; i++) {
+        const a = ring[i];
+        const b = ring[m - 1 - i];
+        if (a >= 0 && b >= 0) matches.push([a, b]);
+      }
+      ring.splice(1, 0, ring.pop());
+    }
+    this.champ = { teams, matches, idx: 0, results: [], done: false, startedAt: Date.now() };
+    this.chatSystem(`🏆 Campeonato com ${n} times e ${matches.length} partidas!`);
+    this.champSetupMatch();
+    this.startGame();
+  }
+
+  champSetupMatch() {
+    const c = this.champ;
+    const [i, j] = c.matches[c.idx];
+    const sides = [c.teams[i], c.teams[j]];
+    this.teamLabels = sides.map((t) => t.name);
+    this.teamColors = sides.map((t, k) => (sides[0].color === sides[1].color && k === 1 ? TEAM_COLORS[1] : t.color));
+    for (const [id, m] of this.members) if (m.bot) this.members.delete(id);
+    this.seats = [
+      [null, null],
+      [null, null],
+    ];
+    sides.forEach((team, t) => {
+      const pubs = team.members.map((x) => x.pub);
+      const here = [...this.members.values()].filter((m) => m.client && pubs.includes(m.pub));
+      here.slice(0, 2).forEach((m, s) => (this.seats[t][s] = m.id));
+    });
+  }
+
+  champRecord(winner) {
+    const c = this.champ;
+    const [i, j] = c.matches[c.idx];
+    c.results[c.idx] = { a: i, b: j, sa: this.score[0], sb: this.score[1], w: winner === 0 ? i : j };
+    const store = this.lobby.store;
+    for (const k of [i, j]) {
+      const t = store?.data.teams[c.teams[k].id];
+      if (!t) continue;
+      t.games++;
+      if ((winner === 0 ? i : j) === k) t.wins++;
+    }
+    store?.save();
+    if (c.idx === c.matches.length - 1) this.champFinish();
+  }
+
+  standings() {
+    const c = this.champ;
+    const rows = c.teams.map((t, k) => ({ k, name: t.name, color: t.color, p: 0, w: 0, l: 0, pf: 0, pa: 0 }));
+    for (const r of c.results) {
+      if (!r) continue;
+      const A = rows[r.a];
+      const B = rows[r.b];
+      A.pf += r.sa;
+      A.pa += r.sb;
+      B.pf += r.sb;
+      B.pa += r.sa;
+      const W = r.w === r.a ? A : B;
+      const L = r.w === r.a ? B : A;
+      W.w++;
+      W.p += 3;
+      L.l++;
+    }
+    return rows.sort((x, y) => y.p - x.p || y.pf - y.pa - (x.pf - x.pa) || y.pf - x.pf);
+  }
+
+  champFinish() {
+    const c = this.champ;
+    c.done = true;
+    const table = this.standings();
+    const podium = table.slice(0, 3);
+    const store = this.lobby.store;
+    podium.forEach((row, place) => {
+      const team = c.teams[row.k];
+      const prize = REWARDS.champ[place];
+      for (const m of team.members) this.lobby.reward?.(m.pub, prize, { title: place === 0 });
+      if (place === 0 && store?.data.teams[team.id]) store.data.teams[team.id].titles++;
+    });
+    store?.data.championships.push({
+      at: Date.now(),
+      teams: c.teams.map((t) => t.name),
+      podium: podium.map((r) => r.name),
+    });
+    store?.save();
+    const medals = ['🥇', '🥈', '🥉'];
+    this.ev({
+      k: 'win',
+      team: this.winner,
+      text: `🏆 Fim do campeonato! ${podium.map((r, i) => `${medals[i]} ${r.name} (+${REWARDS.champ[i]} 🪙 cada)`).join('  ')}`,
+    });
+  }
+
+  champNext() {
+    const c = this.champ;
+    if (c.done) {
+      this.champ = null;
+      this.teamLabels = this.teamColors = null;
+      return this.backToLobby();
+    }
+    c.idx++;
+    this.champSetupMatch();
+    this.startGame();
+  }
+
+  champView() {
+    const c = this.champ;
+    if (!c) return null;
+    return {
+      teams: c.teams.map((t) => ({ name: t.name, color: t.color, members: t.members.map((m) => m.name) })),
+      matches: c.matches.map(([a, b], i) => ({ a, b, r: c.results[i] || null })),
+      idx: c.idx,
+      done: c.done,
+      table: this.standings(),
+    };
   }
 
   enterFinal() {
@@ -1120,7 +1334,7 @@ export class Room {
     if (!fs.thrown) return;
     if ((!b.holder && b.restT > 0.6) || b.outside || (b.holder && this.time - b.throwT > 0.4)) {
       const bt = this.battingTeam;
-      this.win(bt, `O lançador errou! Vitória do Time ${TEAM_NAMES[bt]}.`);
+      this.win(bt, `O lançador errou! Vitória do Time ${this.teamName(bt)}.`);
     }
   }
 
@@ -1128,11 +1342,11 @@ export class Room {
     const bt = this.battingTeam;
     const loss = Math.ceil(this.rules.targetScore / 2);
     this.score[bt] = Math.max(0, this.score[bt] - loss);
-    this.ev({ k: 'lancha', text: `Acertou ${p.name}! Time ${TEAM_NAMES[bt]} perde ${loss} pontos, mas continua no taco.` });
+    this.ev({ k: 'lancha', text: `Acertou ${p.name}! Time ${this.teamName(bt)} perde ${loss} pontos, mas continua no taco.` });
     this.phase = 'swap';
     this.phaseUntil = this.time + 2.5;
     this.nextBatting = bt;
-    this.nextText = `Time ${TEAM_NAMES[bt]} continua com os tacos.`;
+    this.nextText = `Time ${this.teamName(bt)} continua com os tacos.`;
   }
 
   clearShoulders() {
@@ -1185,7 +1399,7 @@ export class Room {
       } else {
         b.vy = 0;
         const sp = hyp(b.vx, b.vz);
-        const dec = (Math.abs(b.x) > FIELD.halfW || Math.abs(b.z) > FIELD.halfL ? 9 : 2.6) * h;
+        const dec = (Math.abs(b.x) > FIELD.halfW || Math.abs(b.z) > FIELD.halfL ? 9 : ROLL_FRICTION[this.rules.scenario] || 2.6) * h;
         if (sp <= dec) b.vx = b.vz = 0;
         else {
           b.vx *= (sp - dec) / sp;
@@ -1322,7 +1536,7 @@ export class Room {
         dx /= l;
         dz /= l;
       }
-      const a = (Math.random() - 0.5) * (1 - q) * 0.9;
+      const a = (Math.random() - 0.5) * (1 - q) * 0.9 * (p.powers?.includes('mira') ? 0.3 : 1);
       const ndx = dx * Math.cos(a) - dz * Math.sin(a);
       dz = dx * Math.sin(a) + dz * Math.cos(a);
       dx = ndx;
@@ -1381,7 +1595,8 @@ export class Room {
           (p.dead ? 16 : 0) |
           (p.frozen ? 32 : 0) |
           (p.bot ? 64 : 0) |
-          (p.charging && b.holder === p.id ? 128 : 0),
+          (p.charging && b.holder === p.id ? 128 : 0) |
+          (p.danceUntil > this.time ? 256 : 0),
         r2(p.swingT),
         r2(hyp(p.vx, p.vz)),
         r2(this.time - p.throwAt),

@@ -39,6 +39,7 @@ server.listen(PORT, () => {
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
+    lobby.store.flush();
     wss.clients.forEach((c) => c.close());
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 2000).unref();

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { FIELD, BASE_R, TEAM_COLORS } from '/shared/config.js';
+import { FIELD, BASE_R, PITCH_LINE } from '/shared/config.js';
 import { buildAvatar } from './avatar.js';
+import { buildScenario, SCENARIO_INFO } from './scenarios.js';
 import { drawBallSkin, GLOWING_BALLS } from './skins.js';
 
 const INTERP_DELAY = 85; // ms
@@ -42,7 +43,6 @@ export class World {
 
     this.avatars = new Map();
     this.snaps = [];
-    this.baseDistance = 10;
     this.buildStatic();
     this.buildBall('tenis');
 
@@ -80,117 +80,37 @@ export class World {
 
   // ------------------------------------------------------------ static field
   buildStatic() {
-    const s = this.scene;
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshStandardMaterial({ color: '#4f7a3a' }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    s.add(ground);
-    const field = new THREE.Mesh(
-      new THREE.PlaneGeometry(FIELD.halfW * 2, FIELD.halfL * 2),
-      new THREE.MeshStandardMaterial({ color: '#6fae4c' }),
-    );
-    field.rotation.x = -Math.PI / 2;
-    field.position.y = 0.005;
-    field.receiveShadow = true;
-    s.add(field);
-
-    // Mowing stripes
-    for (let i = -FIELD.halfL; i < FIELD.halfL; i += 4) {
-      const st = new THREE.Mesh(new THREE.PlaneGeometry(FIELD.halfW * 2, 2), new THREE.MeshStandardMaterial({ color: '#79b856' }));
-      st.rotation.x = -Math.PI / 2;
-      st.position.set(0, 0.007, i + 1);
-      st.receiveShadow = true;
-      s.add(st);
-    }
-
     this.fieldGroup = new THREE.Group();
-    s.add(this.fieldGroup);
-
-    // Fence
-    const wood = new THREE.MeshStandardMaterial({ color: '#8a5a2b', flatShading: true });
-    const addRail = (x1, z1, x2, z2) => {
-      const len = Math.hypot(x2 - x1, z2 - z1);
-      for (const y of [0.45, 0.95]) {
-        const r = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, len), wood);
-        r.position.set((x1 + x2) / 2, y, (z1 + z2) / 2);
-        r.rotation.y = Math.atan2(x2 - x1, z2 - z1);
-        r.castShadow = true;
-        s.add(r);
-      }
-      const n = Math.ceil(len / 2.5);
-      for (let i = 0; i <= n; i++) {
-        const p = new THREE.Mesh(new THREE.BoxGeometry(0.12, FIELD.fenceH + 0.1, 0.12), wood);
-        p.position.set(x1 + ((x2 - x1) * i) / n, (FIELD.fenceH + 0.1) / 2, z1 + ((z2 - z1) * i) / n);
-        p.castShadow = true;
-        s.add(p);
-      }
-    };
-    const W = FIELD.halfW;
-    const L = FIELD.halfL;
-    addRail(-W, -L, W, -L);
-    addRail(-W, L, W, L);
-    addRail(-W, -L, -W, L);
-    addRail(W, -L, W, L);
-
-    // Mato (tall grass) outside the fence
-    const tuftGeo = new THREE.ConeGeometry(0.25, 0.9, 4);
-    const tuftMat = new THREE.MeshStandardMaterial({ color: '#3d6b2a', flatShading: true });
-    const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 900);
-    const m = new THREE.Matrix4();
-    let n = 0;
-    while (n < 900) {
-      const x = (Math.random() * 2 - 1) * FIELD.worldHalfW;
-      const z = (Math.random() * 2 - 1) * FIELD.worldHalfL;
-      if (Math.abs(x) < W + 0.6 && Math.abs(z) < L + 0.6) continue;
-      const sc = 0.6 + Math.random() * 0.9;
-      m.compose(new THREE.Vector3(x, 0.4 * sc, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.random() * 3, 0)), new THREE.Vector3(sc, sc, sc));
-      tufts.setMatrixAt(n++, m);
-    }
-    s.add(tufts);
-
-    // Trees and houses around
-    const trunk = new THREE.MeshStandardMaterial({ color: '#6b4226', flatShading: true });
-    const leaves = new THREE.MeshStandardMaterial({ color: '#2f6b2f', flatShading: true });
-    for (let i = 0; i < 26; i++) {
-      const a = (i / 26) * Math.PI * 2;
-      const r = 45 + Math.random() * 12;
-      const g = new THREE.Group();
-      g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 3, 6), trunk), { castShadow: true }));
-      g.children[0].position.y = 1.5;
-      const top = new THREE.Mesh(new THREE.IcosahedronGeometry(2 + Math.random(), 0), leaves);
-      top.position.y = 4;
-      top.castShadow = true;
-      g.add(top);
-      g.position.set(Math.cos(a) * r, 0, Math.sin(a) * r * 1.2);
-      s.add(g);
-    }
-    const houseCols = ['#f4d35e', '#ee964b', '#f95738', '#a7c957', '#8ecae6', '#ffafcc'];
-    for (let i = 0; i < 10; i++) {
-      const g = new THREE.Group();
-      const w = 6 + Math.random() * 3;
-      const h = 3 + Math.random() * 2;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, 5), new THREE.MeshStandardMaterial({ color: houseCols[i % 6], flatShading: true }));
-      body.position.y = h / 2;
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(w * 0.75, 2.2, 4), new THREE.MeshStandardMaterial({ color: '#9b2226', flatShading: true }));
-      roof.position.y = h + 1.1;
-      roof.rotation.y = Math.PI / 4;
-      g.add(body, roof);
-      const side = i < 5 ? -1 : 1;
-      g.position.set(-24 + (i % 5) * 12, 0, side * 62);
-      s.add(g);
-    }
+    this.scene.add(this.fieldGroup);
+    this.setScenario('campinho');
   }
 
-  setBaseDistance(d) {
+  setScenario(name) {
+    if (this.scenarioName === name) return;
+    if (this.scenarioGroup) this.scene.remove(this.scenarioGroup);
+    this.scenarioName = name;
+    this.scenarioGroup = buildScenario(name);
+    this.scene.add(this.scenarioGroup);
+    const info = SCENARIO_INFO[name] || SCENARIO_INFO.campinho;
+    this.scene.background = new THREE.Color(info.sky);
+    this.scene.fog = new THREE.Fog(info.sky, 60, 140);
+    this.stripColor = info.strip;
+    if (this.baseDistance) this.setBaseDistance(this.baseDistance, true);
+  }
+
+  setBaseDistance(d, force = false) {
+    if (!force && this.baseDistance === d && this.targets?.length) return;
     this.baseDistance = d;
     const g = this.fieldGroup;
     while (g.children.length) g.remove(g.children[0]);
     const half = d / 2;
-    const dirt = new THREE.Mesh(new THREE.PlaneGeometry(3.2, d + 6), new THREE.MeshStandardMaterial({ color: '#b38b5d' }));
-    dirt.rotation.x = -Math.PI / 2;
-    dirt.position.y = 0.012;
-    dirt.receiveShadow = true;
-    g.add(dirt);
+    if (this.stripColor) {
+      const dirt = new THREE.Mesh(new THREE.PlaneGeometry(3.2, d + 6), new THREE.MeshStandardMaterial({ color: this.stripColor }));
+      dirt.rotation.x = -Math.PI / 2;
+      dirt.position.y = 0.012;
+      dirt.receiveShadow = true;
+      g.add(dirt);
+    }
     const chalk = new THREE.MeshBasicMaterial({ color: '#ffffff' });
     const mid = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.06), chalk);
     mid.rotation.x = -Math.PI / 2;
@@ -207,7 +127,7 @@ export class World {
       this.baseRings.push(ring);
       const behind = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.05), chalk);
       behind.rotation.x = -Math.PI / 2;
-      behind.position.set(0, 0.02, z + (k === 0 ? -1 : 1) * 0.4);
+      behind.position.set(0, 0.02, z + (k === 0 ? -1 : 1) * PITCH_LINE);
       g.add(behind);
       g.add(this.makeTripod(z));
     }
@@ -263,7 +183,8 @@ export class World {
     this.myId = myId;
     const want = new Set(playerIds);
     for (const [id, a] of this.avatars) {
-      if (!want.has(id) || a.cfgKey !== JSON.stringify(members.get(id)?.avatar) || a.name !== members.get(id)?.name) {
+      const mm = members.get(id);
+      if (!want.has(id) || a.cfgKey !== JSON.stringify(mm?.avatar) || a.name !== mm?.name || a.color !== mm?.color) {
         this.scene.remove(a.av.root, a.label);
         this.avatars.delete(id);
       }
@@ -275,13 +196,13 @@ export class World {
       const av = buildAvatar(m.avatar);
       av.setBallSkin(this.ballSkin);
       this.scene.add(av.root);
-      const label = this.makeLabel(m.name, m.team, id === myId);
+      const label = this.makeLabel(m.name, m.color, id === myId);
       this.scene.add(label);
-      this.avatars.set(id, { av, label, cfgKey: JSON.stringify(m.avatar), name: m.name, team: m.team, x: 0, z: 0, rot: 0 });
+      this.avatars.set(id, { av, label, cfgKey: JSON.stringify(m.avatar), name: m.name, color: m.color, team: m.team, x: 0, z: 0, rot: 0 });
     }
   }
 
-  makeLabel(name, team, me) {
+  makeLabel(name, color, me) {
     const c = document.createElement('canvas');
     c.width = 256;
     c.height = 64;
@@ -292,7 +213,7 @@ export class World {
     g.beginPath();
     g.roundRect((256 - w) / 2, 8, w, 46, 14);
     g.fill();
-    g.strokeStyle = TEAM_COLORS[team] || '#fff';
+    g.strokeStyle = color || '#fff';
     g.lineWidth = 4;
     g.stroke();
     g.fillStyle = me ? '#ffd23f' : '#ffffff';
@@ -379,6 +300,7 @@ export class World {
             throwAge: pb[7],
             charging: pb[0] === this.myId && ctx.myCharging != null ? ctx.myCharging : !!(flags & 128),
             celebrate: ctx.celebrateTeam === av.team,
+            dancing: !!(flags & 256),
           },
           dt,
         );

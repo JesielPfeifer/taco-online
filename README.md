@@ -8,7 +8,13 @@ Servidor Node.js autoritativo com WebSocket, cliente Three.js, tudo num containe
 - **Movimento livre** com teclado + mouse: o lançador corre atrás da bolinha por todo o campo (e pelo mato), os rebatedores correm lado a lado e batem os tacos no meio.
 - **Boneco personalizável** com nome e 18 partes, todas com 6+ opções: pele, altura/corpo, cabelo, cor do cabelo, olhos, barba,
   **boné/chapéu (10)**, cor do boné, **óculos de sol (8)**, **brinco (8)**, **relógio (7)**, colar, camiseta, cor da camiseta, calça/bermuda, cor da calça, calçado e skin do taco.
-- **10 skins de bolinha**: tênis, borracha vermelha, bola de meia, futebol, praia, neon, melancia, fogo, beisebol e basquete.
+- **13 skins de bolinha** (tênis, meia, futebol, fogo, galáxia, bola de ouro…), algumas compradas na loja.
+- **Moedas, loja e poderes**: cada partida rende moedas; compre bolinhas, tacos e chapéus premium e poderes
+  (corrida prolongada, mira quase perfeita, dancinha).
+- **Times e campeonatos**: crie sua dupla, dispute campeonatos todos-contra-todos; 1º, 2º e 3º lugares ganham moedas. Ranking geral.
+- **5 cenários**: campinho, rua de bairro, sítio, estacionamento do mercado e praia (a bola rola diferente em cada chão).
+- **Chat de voz por proximidade** (WebRTC): quanto mais longe o boneco, mais baixo.
+- **Câmera** em 3ª pessoa atrás do boneco (mouse gira) ou em **1ª pessoa**.
 
 ## Rodando no homelab
 
@@ -26,6 +32,14 @@ docker compose up -d --build        # porta: TACO_PORT=8080 docker compose up -d
 ```
 
 Abra `http://IP-DO-SERVIDOR:3000`, crie uma sala e mande o link (`/?sala=CODIGO`) para os amigos.
+
+**Dados**: moedas, compras, times e campeonatos ficam em `/data/taco.json` (volume `taco-data` no compose).
+No `docker run`, adicione `-v taco-data:/data`. Cada navegador guarda uma chave secreta do jogador; limpar os
+dados do site perde a carteira daquele navegador.
+
+**Chat de voz**: o navegador só libera o microfone em **HTTPS** (ou `localhost`), então coloque o jogo atrás de um
+proxy com certificado. Na rede local basta o STUN padrão; para amigos de fora atrás de NAT restrito, configure um
+TURN (por exemplo coturn) com `TURN_URL`, `TURN_USERNAME` e `TURN_CREDENTIAL`.
 
 **Proxy reverso**: o jogo usa WebSocket em `/ws`. No Nginx inclua `proxy_set_header Upgrade $http_upgrade;` e
 `proxy_set_header Connection "upgrade";`. Caddy e Traefik já fazem isso sozinhos. `GET /health` serve de health check.
@@ -54,8 +68,23 @@ Requer Node.js 20+. Variável `PORT` muda a porta (padrão 3000).
 | Lançador | `F` ou botão direito | Queimar a casinha na mão (só se estiver desprotegida) |
 | Lançador | `R` / `P` | Pedir "reta" (bete-ombro) / gritar "pátio" |
 | Todos | `T` | Pedir tempo |
-| Todos | `V`, roda do mouse | Câmera geral, zoom |
+| Todos | Clique no campo + mouse | Prende o mouse: girar a câmera, mira no centro da tela (`Esc` solta) |
+| Todos | `Q` / `E`, `X` | Girar a câmera pelo teclado, meia-volta |
+| Todos | `C`, `V`, roda do mouse | 1ª/3ª pessoa, câmera geral, zoom |
+| Todos | `G` | Dancinha (poder comprado) |
+| Todos | `B` | Liga/desliga o microfone |
 | Todos | `Enter`, `M`, `H` | Conversar, som, ajuda com as regras |
+
+## Moedas, loja, times e campeonato
+
+- Vitória dá 50 🪙 e derrota 15 🪙 por jogador humano; todo jogador começa com 100 🪙.
+- **Loja** (menu ou sala): bolinhas premium (neon, melancia, fogo, basquete, ouro, galáxia, arco-íris), tacos (rosa choque,
+  camuflado, dourado, neon), chapéus (coroa, cartola) e poderes. Itens premium podem ser provados no boneco antes de comprar.
+- **Poderes** (o anfitrião pode desligar na sala): *Corrida prolongada* (fôlego dura o dobro), *Mira quase perfeita*
+  (lançamento e rebatida quase sem desvio), *Dancinha* (`G`). Cada poder comprado pode ser ligado/desligado na loja.
+- **Times**: "Meus times" cria uma dupla com código para o parceiro entrar.
+- **Campeonato**: na sala, o anfitrião marca as duplas presentes (2 a 6) e inicia. Todos contra todos, 3 pontos por vitória,
+  desempate por saldo. Ao final: 🥇 500, 🥈 300, 🥉 150 moedas para cada jogador da dupla, e o título conta no ranking.
 
 ## Regras implementadas
 
@@ -64,7 +93,7 @@ O jogo segue o texto da Wikipédia; o que varia por região vira opção na sala
 | Regra | Como funciona no jogo |
 | --- | --- |
 | Duplas, tacos, casinhas | Duas duplas; cada rebatedor numa base com tripé (casinha) no centro do círculo; lançadores atrás das bases. Distância entre bases configurável (6–12 m). |
-| Lançamento | Só vale como lançamento se feito **de trás da base do seu lado** e mirando a casinha oposta — esse arremesso derruba a casinha mesmo com taco no chão. |
+| Lançamento | Só vale como lançamento se feito **de trás da linha atrás da base do seu lado** e mirando a casinha oposta — esse arremesso derruba a casinha mesmo com taco no chão. |
 | Taco no chão (regra 1) | Rebatedor dentro do círculo com o taco no chão protege a casinha (anel verde). Tirar o taco antes do lançamento deixa a casinha ser derrubada, inclusive pelo lançador do mesmo lado. |
 | Troca (regra 2) | Casinha derrubada: o jogo para e as duplas trocam de papel. |
 | Corrida e ponto | Depois da rebatida os rebatedores cruzam no meio, batem os tacos e encostam na base oposta. Repete até um lançador voltar para trás de uma base com a bola. Lançador que chega antes pode queimar a casinha. |
@@ -85,9 +114,10 @@ O jogo segue o texto da Wikipédia; o que varia por região vira opção na sala
 server/index.js   Express (estáticos) + WebSocket /ws
 server/lobby.js   Conexões, criação e entrada em salas
 server/room.js    Partida autoritativa a 60 Hz: física da bola, regras, eventos, snapshots a 30 Hz
+server/store.js   Persistência (JSON atômico em DATA_DIR): carteiras, compras, times, campeonatos
 server/bots.js    IA dos bots (lançar, rebater, correr, pedir reta/pátio, minijogos de início)
 shared/config.js  Constantes, regras, opções de avatar e skins (usado pelo servidor e pelo navegador)
-public/js/        Cliente: Three.js (cena, boneco low-poly procedural), HUD, controles, áudio sintetizado
+public/js/        Cliente: Three.js (cenários, boneco low-poly procedural com poses-chave), HUD, loja, voz WebRTC
 test/             Testes com partidas bot × bot completas
 ```
 

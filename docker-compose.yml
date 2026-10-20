@@ -5,4 +5,15 @@ services:
     container_name: taco-online
     ports:
       - "${TACO_PORT:-3000}:3000"
+    volumes:
+      - taco-data:/data # moedas, compras, times e campeonatos
+    environment:
+      # Voz: STUN basta na rede local. Para amigos atrás de NAT restrito, configure um TURN (ex.: coturn).
+      - STUN_URLS=stun:stun.l.google.com:19302
+      # - TURN_URL=turn:seu-dominio:3478
+      # - TURN_USERNAME=taco
+      # - TURN_CREDENTIAL=troque-esta-senha
     restart: unless-stopped
+
+volumes:
+  taco-data:

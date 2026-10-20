@@ -185,6 +185,27 @@ export function buildAvatar(cfg) {
     const walk = { gl: s, gr: -s, lx: -s * 0.8, rx: s * 0.8, le: -0.35 * sp, re: -0.35 * sp, bob: Math.abs(Math.sin(anim.phase)) * 0.05 * sp };
     let pose = walk;
 
+    if (st.dancing) {
+      // Dancinha: hips sway, arms pump, a little hop and spin.
+      const d = anim.phase * 1.6;
+      pose = {
+        twist: Math.sin(d) * 0.6,
+        lean: Math.sin(d * 2) * 0.08,
+        rx: -2.2 + Math.sin(d * 2) * 0.6,
+        rz: -0.5,
+        re: -1.2,
+        lx: -2.2 - Math.sin(d * 2) * 0.6,
+        lz: 0.5,
+        le: -1.2,
+        gl: Math.max(0, Math.sin(d * 2)) * -0.6,
+        gr: Math.max(0, -Math.sin(d * 2)) * -0.6,
+        bob: Math.abs(Math.sin(d * 2)) * 0.12,
+      };
+      body.rotation.y = Math.sin(d * 0.5) * 0.6;
+      applyPose(pose);
+      return;
+    }
+    body.rotation.y = 0;
     if (st.celebrate) {
       const w2 = Math.sin(anim.phase * 2) * 0.2;
       pose = { lx: -2.9 + w2, lz: 0.3, rx: -2.9 - w2, rz: -0.3, bob: Math.abs(Math.sin(anim.phase * 1.5)) * 0.25 };
@@ -527,6 +548,25 @@ function addHat(head, style, col, hairStyle) {
     case 9: {
       g.add(mesh(new THREE.CylinderGeometry(0.17, 0.215, 0.17, 12), m, 0, 0.14, 0));
       g.add(mesh(new THREE.CylinderGeometry(0.22, 0.3, 0.07, 12, 1, true), m, 0, 0.04, 0));
+      break;
+    }
+    case 10: {
+      // Coroa (premium): golden band with points and jewels.
+      const gold = metal(GOLD);
+      g.add(mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.08, 12, 1, true), gold, 0, 0.17, 0));
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        g.add(mesh(new THREE.ConeGeometry(0.04, 0.1, 4), gold, Math.sin(a) * 0.19, 0.25, Math.cos(a) * 0.19));
+        g.add(mesh(sphere(0.018, 6, 4), mat(['#ef4444', '#3b82f6', '#22c55e'][i % 3], { emissive: '#330000' }), Math.sin(a) * 0.2, 0.17, Math.cos(a) * 0.2));
+      }
+      break;
+    }
+    case 11: {
+      // Cartola (premium): tall top hat with a coloured band.
+      const black = mat('#111111');
+      g.add(mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.02, 14), black, 0, 0.12, 0));
+      g.add(mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.32, 14), black, 0, 0.29, 0));
+      g.add(mesh(new THREE.CylinderGeometry(0.172, 0.172, 0.05, 14), m, 0, 0.16, 0));
       break;
     }
   }
