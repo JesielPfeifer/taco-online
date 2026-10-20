@@ -165,13 +165,22 @@ function randOut(pad = 0.6) {
 }
 
 // ---- scenarios
+// ground = colour under the pitch lines (used to pick contrasting line colours).
 export const SCENARIO_INFO = {
-  campinho: { sky: '#9fd3f5', strip: '#b38b5d' },
-  rua: { sky: '#a9d6f5', strip: null },
-  sitio: { sky: '#bfe0f0', strip: '#a07a4a' },
-  mercado: { sky: '#b5d9f2', strip: null },
-  praia: { sky: '#8fd0ff', strip: null },
+  campinho: { sky: '#9fd3f5', strip: '#b38b5d', ground: '#6fae4c' },
+  rua: { sky: '#a9d6f5', strip: null, ground: '#3b3f45' },
+  sitio: { sky: '#bfe0f0', strip: '#a07a4a', ground: '#a98b5d' },
+  mercado: { sky: '#b5d9f2', strip: null, ground: '#4a4f55' },
+  praia: { sky: '#8fd0ff', strip: null, ground: '#f1e3b8' },
 };
+
+// Line colour + outline that stay readable on the given ground: dark lines with a light
+// outline on light ground (sand), white lines with a dark outline elsewhere.
+export function lineColors(ground) {
+  const c = new THREE.Color(ground);
+  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; // linear-light luminance
+  return lum > 0.45 ? { line: '#12304a', outline: '#ffffff' } : { line: '#ffffff', outline: '#1b1b1b' };
+}
 
 export function buildScenario(name) {
   const g = new THREE.Group();

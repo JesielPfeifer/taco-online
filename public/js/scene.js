@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { FIELD, BASE_R, PITCH_LINE } from '/shared/config.js';
 import { buildAvatar } from './avatar.js';
-import { buildScenario, SCENARIO_INFO } from './scenarios.js';
+import { buildScenario, SCENARIO_INFO, lineColors } from './scenarios.js';
 import { drawBallSkin, GLOWING_BALLS } from './skins.js';
 
 const INTERP_DELAY = 85; // ms
@@ -95,6 +95,7 @@ export class World {
     this.scene.background = new THREE.Color(info.sky);
     this.scene.fog = new THREE.Fog(info.sky, 60, 140);
     this.stripColor = info.strip;
+    this.lines = lineColors(info.strip || info.ground);
     if (this.baseDistance) this.setBaseDistance(this.baseDistance, true);
   }
 
@@ -111,24 +112,30 @@ export class World {
       dirt.receiveShadow = true;
       g.add(dirt);
     }
-    const chalk = new THREE.MeshBasicMaterial({ color: '#ffffff' });
-    const mid = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.06), chalk);
-    mid.rotation.x = -Math.PI / 2;
-    mid.position.y = 0.02;
-    g.add(mid);
+    // Every marking is drawn twice: a wider outline in the contrast colour, then the line.
+    const { line, outline } = this.lines;
+    const chalk = new THREE.MeshBasicMaterial({ color: line });
+    const edge = new THREE.MeshBasicMaterial({ color: outline });
+    const flat = (geo, mat, x, y, z) => {
+      const o = new THREE.Mesh(geo, mat);
+      o.rotation.x = -Math.PI / 2;
+      o.position.set(x, y, z);
+      g.add(o);
+      return o;
+    };
+    const addLine = (w, d, z) => {
+      flat(new THREE.PlaneGeometry(w + 0.08, d + 0.08), edge, 0, 0.018, z);
+      flat(new THREE.PlaneGeometry(w, d), chalk, 0, 0.02, z);
+    };
+    addLine(3.2, 0.07, 0);
     this.baseRings = [];
     this.targets = [];
     for (const k of [0, 1]) {
       const z = (k === 0 ? -1 : 1) * half;
-      const ring = new THREE.Mesh(new THREE.RingGeometry(BASE_R - 0.06, BASE_R, 32), new THREE.MeshBasicMaterial({ color: '#ffffff' }));
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(0, 0.022, z);
-      g.add(ring);
+      flat(new THREE.RingGeometry(BASE_R - 0.1, BASE_R + 0.04, 40), edge, 0, 0.02, z);
+      const ring = flat(new THREE.RingGeometry(BASE_R - 0.07, BASE_R, 40), new THREE.MeshBasicMaterial({ color: line }), 0, 0.022, z);
       this.baseRings.push(ring);
-      const behind = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.05), chalk);
-      behind.rotation.x = -Math.PI / 2;
-      behind.position.set(0, 0.02, z + (k === 0 ? -1 : 1) * PITCH_LINE);
-      g.add(behind);
+      addLine(3, 0.07, z + (k === 0 ? -1 : 1) * PITCH_LINE);
       g.add(this.makeTripod(z));
     }
   }
@@ -342,7 +349,7 @@ export class World {
       }
       // Base rings: green when protected
       if (this.baseRings && ctx.protectedBases)
-        this.baseRings.forEach((r, k) => r.material.color.set(ctx.protectedBases[k] ? '#3ddc84' : '#ffffff'));
+        this.baseRings.forEach((r, k) => r.material.color.set(ctx.protectedBases[k] ? '#1fbf62' : this.lines.line));
     }
 
     // Aim helpers
