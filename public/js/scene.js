@@ -332,7 +332,7 @@ export class World {
       this.trailPts.pop();
       this.trailPts.unshift(this.ball.position.clone());
       this.trail.geometry.setFromPoints(this.trailPts);
-      this.trail.visible = !held;
+      this.trail.visible = !held && !this.reduceMotion;
       // Targets
       if (this.targets && b.kn)
         this.targets.forEach((t, k) => {
@@ -373,7 +373,8 @@ export class World {
     const cam = this.camera;
     if (this.overview || !me) {
       const pos = new THREE.Vector3(-26 * this.camDist, 22 * this.camDist, 0);
-      cam.position.lerp(pos, Math.min(1, dt * 4));
+      if (this.reduceMotion) cam.position.copy(pos);
+      else cam.position.lerp(pos, Math.min(1, dt * 4));
       cam.lookAt(0, 0, 0);
       this.camTarget = null;
       return;
@@ -393,8 +394,10 @@ export class World {
     const dist = 4.6 * this.camDist;
     const pos = pivot.clone().addScaledVector(dir, -dist);
     pos.y = Math.max(0.4, pos.y);
-    // Follow position tightly (no lag while sprinting), smooth only the small corrections.
-    cam.position.lerp(pos, Math.min(1, dt * 18));
+    // Default: glued to the player (no sway, best against motion sickness). The comfort
+    // "smoothing" option trades that for a softer, slightly lagging follow.
+    const follow = this.smoothing ? 18 * (1 - this.smoothing) + 2 : 60;
+    cam.position.lerp(pos, Math.min(1, dt * follow));
     cam.lookAt(cam.position.clone().add(dir));
   }
 

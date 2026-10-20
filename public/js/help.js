@@ -14,6 +14,8 @@ cruzando os tacos no meio do campo; os lançadores tentam derrubar a casinha (tr
 <li><b>Câmera</b>: clique no campo para prender o mouse — mexer o mouse gira a câmera e a mira vira o círculo no centro da tela
 (<kbd>Esc</kbd> solta). <kbd>Q</kbd>/<kbd>E</kbd> giram pelo teclado, <kbd>X</kbd> dá meia-volta, <kbd>C</kbd> alterna 1ª/3ª pessoa,
 <kbd>V</kbd> mostra o campo todo, roda do mouse dá zoom. A câmera segue atrás do boneco na corrida e, parado na base, vira sozinha para o campo.</li>
+<li><b>⚙️ Opções</b> (menu inicial, sala ou <kbd>Esc</kbd> → Opções): sensibilidade do mouse, câmera e <b>acessibilidade</b> —
+reduzir movimento contra enjoo, giro em passos, vinheta de conforto, ponto fixo, tamanho da interface e cores para daltonismo.</li>
 <li><kbd>Esc</kbd> ou ☰: menu da partida — <b>pedir rendição</b> (o parceiro humano precisa aceitar; o outro time vence) ou
 <b>sair da partida</b> deixando um bot no seu lugar.</li>
 <li><kbd>T</kbd> pedir tempo · <kbd>Enter</kbd> conversar · <kbd>M</kbd> som · <kbd>B</kbd> liga/desliga o microfone · <kbd>H</kbd> esta ajuda</li>

@@ -35,6 +35,7 @@
             <button data-open-shop>🛒 Loja</button>
             <button data-open-teams>👥 Meus times</button>
             <button data-open-rank>🏆 Ranking</button>
+            <button data-open-options>⚙️ Opções</button>
           </div>
           <button id="createRoom" class="primary big">Criar sala</button>
           <div class="join-row">
@@ -60,6 +61,7 @@
           <span class="wallet">🪙 …</span>
           <button data-open-shop class="ghost">🛒 Loja</button>
           <button data-open-teams class="ghost">👥 Times</button>
+          <button data-open-options class="ghost">⚙️ Opções</button>
           <button id="copyLink" class="ghost">Copiar link</button>
         </div>
       </div>
@@ -97,6 +99,7 @@
     <!-- ============ GAME ============ -->
     <section id="game" class="screen">
       <div id="viewport"></div>
+      <div id="vignette"></div>
       <div id="hud">
         <div id="scoreboard"></div>
         <div id="status"></div>
@@ -122,10 +125,7 @@
         <div class="modal-card">
           <h2>Menu da partida</h2>
           <button class="primary big" data-menu="resume">▶ Continuar jogando</button>
-          <details class="settings" open>
-            <summary>⚙️ Ajustes de câmera e mouse</summary>
-            <div id="settingsPanel"></div>
-          </details>
+          <button class="big" data-menu="options">⚙️ Opções (câmera, mouse, acessibilidade)</button>
           <button class="big" data-menu="surrender">🏳️ Pedir rendição</button>
           <p class="muted small">Seu time entrega o jogo e o adversário vence. Se o parceiro for humano, ele precisa aceitar. Quem se rende não ganha moedas.</p>
           <button class="big" data-menu="leave">🚪 Sair da partida (um bot assume meu lugar)</button>
@@ -138,6 +138,7 @@
 
     <div id="shopBox" class="modal fixed hidden"><div class="modal-card wide" id="shopBody"></div></div>
     <div id="teamsBox" class="modal fixed hidden"><div class="modal-card wide" id="teamsBody"></div></div>
+    <div id="optionsBox" class="modal fixed hidden"><div class="modal-card wide" id="optionsBody"></div></div>
     <div id="rankBox" class="modal fixed hidden"><div class="modal-card wide" id="rankBody"></div></div>
     <div id="toast"></div>
     <script type="module" src="/js/main.js"></script>

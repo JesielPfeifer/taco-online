@@ -70,7 +70,7 @@ Requer Node.js 20+. Variável `PORT` muda a porta (padrão 3000).
 | Lançador | `F` ou botão direito | Queimar a casinha na mão (só se estiver desprotegida) |
 | Lançador | `R` / `P` | Pedir "reta" (bete-ombro) / gritar "pátio" |
 | Todos | `T` | Pedir tempo |
-| Todos | `Esc` / ☰ | Menu: ajustes de câmera (sensibilidade, inverter Y, distância, campo de visão), pedir rendição, sair (um bot assume) |
+| Todos | `Esc` / ☰ | Menu da partida: **Opções**, pedir rendição, sair (um bot assume) |
 | Todos | `[` / `]` | Diminuir / aumentar a sensibilidade do mouse |
 | Todos | Clique no campo + mouse | Prende o mouse: girar a câmera, mira no centro da tela (`Esc` solta) |
 | Todos | `Q` / `E`, `X` | Girar a câmera pelo teclado, meia-volta |
@@ -78,6 +78,17 @@ Requer Node.js 20+. Variável `PORT` muda a porta (padrão 3000).
 | Todos | `G` | Dancinha (poder comprado) |
 | Todos | `B` | Liga/desliga o microfone |
 | Todos | `Enter`, `M`, `H` | Conversar, som, ajuda com as regras |
+
+## Opções e acessibilidade
+
+**⚙️ Opções** abre no menu inicial (antes de jogar), na sala e no jogo (`Esc` → Opções). Tudo fica salvo no navegador e vale na hora.
+
+- **Câmera e mouse**: sensibilidade (1× = igual ao cursor do PC), distância, campo de visão, inverter eixo vertical,
+  câmera virando sozinha para o campo.
+- **Acessibilidade / enjoo (motion sickness)**: *Reduzir movimento* (sem giros automáticos, viradas instantâneas, sem rastro da
+  bola e sem animações de tela; liga sozinho se o sistema pedir "reduzir movimento"), *giro em passos* de 45° no Q/E,
+  *suavização* da câmera (0 = presa ao boneco, sem balanço), *vinheta de conforto* ao mover/girar, *ponto fixo* no centro da
+  tela, *tamanho do texto/interface* e *cores para daltonismo* (azul × laranja).
 
 ## Moedas, loja, times e campeonato
 

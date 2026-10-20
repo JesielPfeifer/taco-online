@@ -67,8 +67,9 @@ function newKey() {
 function tName(t) {
   return state.room?.teamLabels?.[t] || TEAM_NAMES[t];
 }
+const COLORBLIND_TEAMS = ['#2f80ed', '#f2994a']; // blue x orange: safe for red-green colour blindness
 function tColor(t) {
-  return state.room?.teamColors?.[t] || TEAM_COLORS[t];
+  return state.room?.teamColors?.[t] || (settings.colorblind ? COLORBLIND_TEAMS : TEAM_COLORS)[t];
 }
 function saveProfile() {
   try {
@@ -894,7 +895,8 @@ function frameContext(dt) {
 
   const role = myRole();
   const holding = mp && mp[4] & 1;
-  $('#crosshair').classList.toggle('on', !!mp && !state.world.overview && (state.locked || state.world.mode === 'first'));
+  $('#crosshair').classList.toggle('on', !!mp && !state.world.overview && (settings.fixedCrosshair || state.locked || state.world.mode === 'first'));
+  updateVignette(dt);
   $('#lockHint').classList.toggle('off', state.locked || !mp || ph === 'decide' || ph === 'gameover');
   updateVoiceSpatial();
   return {
@@ -909,7 +911,23 @@ function frameContext(dt) {
 
 const TURN_SPEED = 1.6; // rad/s for Q/E
 // Camera settings, saved per browser. sens 1 = same as the desktop cursor.
-const SETTINGS_DEFAULT = { sens: 1, invertY: false, dist: 1, fov: 55, autoFace: true };
+const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false;
+const SETTINGS_DEFAULT = {
+  // camera & mouse
+  sens: 1,
+  invertY: false,
+  dist: 1,
+  fov: 55,
+  autoFace: !prefersReducedMotion,
+  // accessibility / comfort (motion sickness)
+  reduceMotion: prefersReducedMotion, // no automatic camera turns, no screen animations, no ball trail
+  snapTurn: false, // Q/E and X turn in instant steps instead of a smooth rotation
+  smoothing: 0, // 0 = camera glued to the player (no sway); higher = softer follow
+  vignette: false, // darken the screen edges while moving/turning
+  fixedCrosshair: false, // always-visible centre dot (stable visual reference)
+  hudScale: 1,
+  colorblind: false, // blue x orange team colours
+};
 const settings = loadSettings();
 function loadSettings() {
   try {
@@ -929,9 +947,13 @@ function saveSettings() {
   }
 }
 function applySettings() {
+  document.body.classList.toggle('reduce-motion', settings.reduceMotion);
+  document.documentElement.style.setProperty('--hud-scale', String(settings.hudScale));
   const w = state.world;
   if (!w) return;
   w.camDist = settings.dist;
+  w.smoothing = settings.smoothing;
+  w.reduceMotion = settings.reduceMotion;
   if (w.camera.fov !== settings.fov) {
     w.camera.fov = settings.fov;
     w.camera.updateProjectionMatrix();
@@ -950,21 +972,23 @@ function wrapAngle(a) {
 function updateCameraYaw(dt, L, mp, ph) {
   const w = state.world;
   const k = state.keys;
-  if (k.has('KeyQ')) {
-    w.yaw += TURN_SPEED * dt;
-    state.lastLook = performance.now();
-    state.yawGoal = null;
-  }
-  if (k.has('KeyE')) {
-    w.yaw -= TURN_SPEED * dt;
-    state.lastLook = performance.now();
-    state.yawGoal = null;
+  if (!settings.snapTurn) {
+    if (k.has('KeyQ')) {
+      w.yaw += TURN_SPEED * dt;
+      state.lastLook = performance.now();
+      state.yawGoal = null;
+    }
+    if (k.has('KeyE')) {
+      w.yaw -= TURN_SPEED * dt;
+      state.lastLook = performance.now();
+      state.yawGoal = null;
+    }
   }
   if (ph !== lastYawPhase) {
     if (ph === 'intro') state.yawGoal = faceFieldYaw(L);
     lastYawPhase = ph;
   }
-  const idle = settings.autoFace && L.speed < 0.3 && performance.now() - state.lastLook > 1500;
+  const idle = settings.autoFace && !settings.reduceMotion && L.speed < 0.3 && performance.now() - state.lastLook > 1500;
   if (state.yawGoal == null && idle && ph === 'playing' && state.room) {
     const half = state.room.rules.baseDistance / 2;
     const atBase = Math.abs(Math.abs(L.z) - half) < 2.8 && Math.abs(L.x) < 3;
@@ -975,8 +999,14 @@ function updateCameraYaw(dt, L, mp, ph) {
   }
   if (state.yawGoal != null) {
     const d = wrapAngle(state.yawGoal - w.yaw);
-    w.yaw += d * Math.min(1, dt * 6);
-    if (Math.abs(d) < 0.02) state.yawGoal = null;
+    // Comfort: jump straight to the new direction instead of a sweeping rotation.
+    if (settings.reduceMotion || settings.snapTurn) {
+      w.yaw = state.yawGoal;
+      state.yawGoal = null;
+    } else {
+      w.yaw += d * Math.min(1, dt * 6);
+      if (Math.abs(d) < 0.02) state.yawGoal = null;
+    }
   }
   w.yaw = wrapAngle(w.yaw);
 }
@@ -987,6 +1017,23 @@ function faceFieldYaw(L) {
   const half = (state.room?.rules.baseDistance || 10) / 2;
   const targetZ = L.z < 0 ? half : -half;
   return Math.atan2(-L.x * 0.6, targetZ - L.z);
+}
+
+// Comfort vignette: the faster the view moves or turns, the darker the screen edges.
+let lastYawV = 0;
+let vignetteLevel = 0;
+function updateVignette(dt) {
+  const el = $('#vignette');
+  if (!settings.vignette || !state.world || dt <= 0) {
+    el.style.opacity = '0';
+    return;
+  }
+  const turn = Math.abs(wrapAngle(state.world.yaw - lastYawV)) / dt;
+  lastYawV = state.world.yaw;
+  const move = state.local ? state.local.speed / 7.6 : 0;
+  const target = Math.min(0.85, turn * 0.35 + move * 0.55);
+  vignetteLevel += (target - vignetteLevel) * Math.min(1, dt * 8);
+  el.style.opacity = vignetteLevel.toFixed(2);
 }
 
 function updateVoiceSpatial() {
@@ -1101,11 +1148,19 @@ function setupInput() {
       case 'KeyB':
         if (voice.on) voice.toggleMute();
         break;
+      case 'KeyQ':
+      case 'KeyE':
+        if (settings.snapTurn) {
+          // Snap turn: 45° steps, no visible rotation.
+          state.world.yaw = wrapAngle(state.world.yaw + (e.code === 'KeyQ' ? 1 : -1) * (Math.PI / 4));
+          state.lastLook = performance.now();
+          state.yawGoal = null;
+        }
+        break;
       case 'BracketLeft':
       case 'BracketRight':
         settings.sens = Math.max(0.2, Math.min(3, +(settings.sens + (e.code === 'BracketRight' ? 0.1 : -0.1)).toFixed(2)));
-        saveSettings();
-        syncSettingsPanel();
+        settingsChanged();
         toast(`Sensibilidade ${settings.sens.toFixed(2)}×`);
         break;
       case 'KeyG':
@@ -1122,13 +1177,15 @@ function setupInput() {
   window.addEventListener('blur', () => state.keys.clear());
   document.querySelector('[data-close-help]').onclick = () => $('#helpBox').classList.add('hidden');
   $('#menuBtn').onclick = () => toggleGameMenu();
-  setupSettingsPanel();
+  for (const b of document.querySelectorAll('[data-open-options]')) b.onclick = () => openOptions();
+  applySettings();
   document.querySelectorAll('[data-menu]').forEach(
     (b) =>
       (b.onclick = () => {
         const a = b.dataset.menu;
         $('#gameMenu').classList.add('hidden');
-        if (a === 'surrender') send({ t: 'surrender' });
+        if (a === 'options') openOptions();
+        else if (a === 'surrender') send({ t: 'surrender' });
         else if (a === 'leave' && confirm('Sair da partida? Um bot vai jogar no seu lugar.')) send({ t: 'leave' });
       }),
   );
@@ -1188,63 +1245,113 @@ function setupInput() {
     (e) => {
       if (!state.world) return;
       settings.dist = Math.max(0.55, Math.min(2.2, settings.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
-      applySettings();
-      saveSettings();
-      syncSettingsPanel();
+      settingsChanged();
     },
     { passive: true },
   );
 }
 
-// In-game camera settings (menu ☰ / Esc). Keys [ and ] change the sensitivity on the fly.
-const SETTING_FIELDS = [
-  ['sens', 'Sensibilidade do mouse', 0.2, 3, 0.05, (v) => `${v.toFixed(2)}×`],
-  ['dist', 'Distância da câmera', 0.55, 2.2, 0.05, (v) => `${v.toFixed(2)}×`],
-  ['fov', 'Campo de visão', 45, 90, 1, (v) => `${v}°`],
+// Options screen: opened from the start menu, the room and Esc → Opções in a match.
+let optionsTab = 'camera';
+const OPTION_TABS = [
+  ['camera', '🖱️ Câmera e mouse'],
+  ['access', '♿ Acessibilidade'],
 ];
-function setupSettingsPanel() {
-  const box = $('#settingsPanel');
-  box.innerHTML =
-    SETTING_FIELDS.map(
-      ([k, label, min, max, step]) =>
-        `<label class="sens">${label} <span data-val="${k}"></span><input type="range" data-set="${k}" min="${min}" max="${max}" step="${step}" /></label>`,
-    ).join('') +
-    `<label class="check"><input type="checkbox" data-check="invertY" /> Inverter eixo vertical</label>
-     <label class="check"><input type="checkbox" data-check="autoFace" /> Parado na base, a câmera vira sozinha para o campo</label>
-     <button class="ghost" data-reset>Restaurar padrão</button>
-     <p class="muted small">Sensibilidade 1× = igual ao cursor do PC (vale a velocidade do mouse do sistema). Atalhos: <kbd>[</kbd> <kbd>]</kbd> sensibilidade, roda do mouse distância.</p>`;
-  box.querySelectorAll('[data-set]').forEach(
+const RANGE_FIELDS = {
+  camera: [
+    ['sens', 'Sensibilidade do mouse', 0.2, 3, 0.05, (v) => `${v.toFixed(2)}×`, '1× = igual ao cursor do PC (a velocidade do mouse do sistema também vale). Atalhos: [ e ].'],
+    ['dist', 'Distância da câmera', 0.55, 2.2, 0.05, (v) => `${v.toFixed(2)}×`, 'Também muda com a roda do mouse.'],
+    ['fov', 'Campo de visão', 45, 90, 1, (v) => `${v}°`, 'Valores maiores costumam enjoar menos.'],
+  ],
+  access: [
+    ['smoothing', 'Suavização da câmera', 0, 0.9, 0.05, (v) => (v ? `${Math.round(v * 100)}%` : 'desligada'), '0 = câmera presa ao boneco, sem balanço (recomendado para quem enjoa).'],
+    ['hudScale', 'Tamanho do texto e da interface', 0.8, 1.6, 0.05, (v) => `${Math.round(v * 100)}%`, ''],
+  ],
+};
+const CHECK_FIELDS = {
+  camera: [
+    ['invertY', 'Inverter eixo vertical', ''],
+    ['autoFace', 'Parado na base, a câmera vira sozinha para o campo', ''],
+  ],
+  access: [
+    ['reduceMotion', 'Reduzir movimento (enjoo / motion sickness)', 'Sem giros automáticos da câmera, viradas instantâneas, sem rastro da bola e sem animações de tela.'],
+    ['snapTurn', 'Giro em passos (Q/E viram 45° na hora)', 'Evita a rotação contínua da imagem.'],
+    ['vignette', 'Vinheta de conforto ao mover/girar', 'Escurece as bordas da tela durante o movimento.'],
+    ['fixedCrosshair', 'Ponto fixo no centro da tela', 'Uma referência estável ajuda o cérebro a não enjoar.'],
+    ['colorblind', 'Cores para daltonismo (azul × laranja)', 'Troca o vermelho do segundo time por laranja.'],
+  ],
+};
+
+function openOptions(tab) {
+  if (tab) optionsTab = tab;
+  renderOptions();
+  openModal('#optionsBox');
+}
+
+function renderOptions() {
+  const ranges = RANGE_FIELDS[optionsTab];
+  const checks = CHECK_FIELDS[optionsTab];
+  $('#optionsBody').innerHTML = `
+    <h2>⚙️ Opções</h2>
+    <div class="choices">${OPTION_TABS.map(([k, l]) => `<button data-otab="${k}" class="${k === optionsTab ? 'sel' : ''}">${l}</button>`).join('')}</div>
+    ${optionsTab === 'access' ? '<p class="muted small">Sente enjoo jogando em 3D? Ligue "Reduzir movimento", deixe a suavização em 0, aumente o campo de visão e experimente a vinheta e o ponto fixo.</p>' : ''}
+    ${ranges
+      .map(
+        ([k, label, min, max, step, , hint]) =>
+          `<label class="sens">${label} <b data-val="${k}"></b><input type="range" data-set="${k}" min="${min}" max="${max}" step="${step}" />${hint ? `<span class="muted small">${hint}</span>` : ''}</label>`,
+      )
+      .join('')}
+    ${checks
+      .map(([k, label, hint]) => `<label class="check"><input type="checkbox" data-check="${k}" /> <span>${label}${hint ? `<br/><span class="muted small">${hint}</span>` : ''}</span></label>`)
+      .join('')}
+    ${optionsTab === 'camera' ? '<p class="muted small">Pré-visualização: as mudanças valem na hora, inclusive no meio da partida.</p>' : ''}
+    <div class="choices"><button class="ghost" data-reset>Restaurar padrão</button><button class="primary" data-close>Pronto</button></div>`;
+  const body = $('#optionsBody');
+  body.querySelectorAll('[data-otab]').forEach((b) => (b.onclick = () => ((optionsTab = b.dataset.otab), renderOptions())));
+  body.querySelectorAll('[data-set]').forEach(
     (inp) =>
       (inp.oninput = () => {
         settings[inp.dataset.set] = Number(inp.value);
-        applySettings();
-        saveSettings();
-        syncSettingsPanel();
+        settingsChanged();
       }),
   );
-  box.querySelectorAll('[data-check]').forEach(
+  body.querySelectorAll('[data-check]').forEach(
     (inp) =>
       (inp.onchange = () => {
         settings[inp.dataset.check] = inp.checked;
-        saveSettings();
+        settingsChanged();
       }),
   );
-  box.querySelector('[data-reset]').onclick = () => {
+  body.querySelector('[data-reset]').onclick = () => {
     Object.assign(settings, SETTINGS_DEFAULT);
-    applySettings();
-    saveSettings();
-    syncSettingsPanel();
+    settingsChanged();
   };
+  body.querySelector('[data-close]').onclick = () => $('#optionsBox').classList.add('hidden');
   syncSettingsPanel();
 }
-function syncSettingsPanel() {
-  const box = $('#settingsPanel');
-  for (const [k, , , , , fmt] of SETTING_FIELDS) {
-    const inp = box.querySelector(`[data-set="${k}"]`);
-    if (inp) inp.value = String(settings[k]);
-    const val = box.querySelector(`[data-val="${k}"]`);
-    if (val) val.textContent = fmt(settings[k]);
+
+function settingsChanged() {
+  applySettings();
+  saveSettings();
+  syncSettingsPanel();
+  // Team colours may have changed (colour-blind palette).
+  if (state.room) {
+    for (const m of state.members.values()) if (m.team != null) m.color = tColor(m.team);
+    if (state.room.phase === 'lobby') renderLobby();
+    else state.world?.syncRoster(state.members, state.room.seats.flat().filter(Boolean), state.myId);
   }
+}
+
+function syncSettingsPanel() {
+  const box = $('#optionsBody');
+  if (!box) return;
+  for (const fields of Object.values(RANGE_FIELDS))
+    for (const [k, , , , , fmt] of fields) {
+      const inp = box.querySelector(`[data-set="${k}"]`);
+      if (inp) inp.value = String(settings[k]);
+      const val = box.querySelector(`[data-val="${k}"]`);
+      if (val) val.textContent = fmt(settings[k]);
+    }
   box.querySelectorAll('[data-check]').forEach((inp) => (inp.checked = !!settings[inp.dataset.check]));
 }
 

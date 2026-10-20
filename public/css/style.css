@@ -1026,3 +1026,34 @@ kbd {
   object-fit: cover;
   border-radius: 8px;
 }
+
+/* options & accessibility */
+#optionsBox {
+  z-index: 8;
+}
+#optionsBody .sens span.muted {
+  display: block;
+}
+#hud {
+  zoom: var(--hud-scale, 1);
+}
+#vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 45%, rgba(0, 0, 0, 0.92) 100%);
+}
+body.reduce-motion *,
+body.reduce-motion *::before,
+body.reduce-motion *::after {
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+}
+body.reduce-motion #banner.show {
+  transform: translate(-50%, -50%);
+}
+body.reduce-motion .map-card:not(:disabled):hover {
+  transform: none;
+}
