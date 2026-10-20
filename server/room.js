@@ -520,6 +520,7 @@ export class Room {
     this.runPending = false;
     this.pendingLose = null;
     this.pendingPenalty = null;
+    this.penalty = null;
     this.finalState = null;
     this.pause = null;
   }
@@ -791,6 +792,7 @@ export class Room {
       if (p.frozen && p.frozenUntil && t > p.frozenUntil) {
         p.frozen = false;
         p.retaThrow = null;
+        if (p.penaltyThrow != null) this.penalty = null;
         p.penaltyThrow = null;
         if (this.reta) this.reta = null;
         this.clearShoulders();
@@ -891,7 +893,7 @@ export class Room {
   }
 
   runsOpen() {
-    if (this.pendingLose || this.pendingPenalty) return false;
+    if (this.pendingLose || this.pendingPenalty || (this.penalty && !this.penalty.thrown)) return false;
     const h = this.ball.holder && this.players.get(this.ball.holder);
     if (h && h.team !== this.battingTeam && (this.isBehind(h, 0) || this.isBehind(h, 1))) return false;
     if (this.batters().some((b) => b.licenca != null)) return false;
@@ -967,6 +969,7 @@ export class Room {
     } else if (p.penaltyThrow != null) {
       kind = 'pitch';
       targetBase = p.penaltyThrow;
+      if (this.penalty) this.penalty.thrown = true;
     } else {
       for (const k of [0, 1]) if (this.isBehind(p, k)) {
         kind = 'pitch';
@@ -996,6 +999,7 @@ export class Room {
     b.vy = vy;
     b.lastTouch = { kind, by: p.id, team: p.team, targetBase, t: this.time };
     b.lanchaDone = false;
+    b.dead = false;
     b.thrower = p.id;
     b.throwT = this.time;
     b.restT = 0;
@@ -1166,24 +1170,48 @@ export class Room {
     }
     this.paraTras++;
     this.ev({ k: 'tras', text: `${this.paraTras === 1 ? 'Uma' : this.paraTras === 2 ? 'Duas' : 'Três'} pra trás${why ? ' ' + why : ''}!` });
-    if (this.paraTras >= lim && !this.pendingLose) this.pendingLose = { at: this.time + 1, text: 'Três pra trás! Perderam os tacos.' };
+    if (this.paraTras >= lim) this.decideLose('Três pra trás! Perderam os tacos.', 1);
+  }
+
+  // Pitch bounced off a body: away from the player's centre, slowed down.
+  deflectOff(p) {
+    const b = this.ball;
+    const dx = b.x - p.x;
+    const dz = b.z - p.z;
+    const d = hyp(dx, dz) || 1;
+    const sp = hyp(b.vx, b.vz) * 0.3;
+    b.vx = (dx / d) * sp;
+    b.vz = (dz / d) * sp;
+    b.vy = Math.abs(b.vy) * 0.3;
+  }
+
+  // The play is over (tacos lost): the ball goes dead so nothing else can happen with it.
+  decideLose(text, delay = 0.8) {
+    if (this.pendingLose) return;
+    this.pendingLose = { at: this.time + delay, text };
+    this.ball.dead = true;
   }
 
   lanchaHit(p) {
     const b = this.ball;
     b.lanchaDone = true;
-    b.vx *= -0.25;
-    b.vz *= -0.25;
-    b.vy = Math.abs(b.vy) * 0.3;
+    this.deflectOff(p);
     const rule = this.rules.lanchaRule;
     if (rule === 'imediato') {
       this.ev({ k: 'lancha', text: `A bola encostou em ${p.name}!` });
-      if (!this.pendingLose) this.pendingLose = { at: this.time + 0.8, text: 'Bola no rebatedor: perderam os tacos!' };
+      this.decideLose('Bola no rebatedor: perderam os tacos!');
       return;
     }
     if (rule === 'penalti') {
+      if (this.penalty) {
+        // The penalty itself hit the body: it does not earn another penalty, play goes on.
+        this.ev({ k: 'msg', text: `O pênalti pegou em ${p.name}. Bola em jogo!` });
+        this.penalty = null;
+        return;
+      }
       this.ev({ k: 'lancha', text: `Bola no pé de ${p.name}: PÊNALTI!` });
       this.pendingPenalty = { at: this.time + 1.2, base: this.nearestBase(p) };
+      b.dead = true; // the deflected ball cannot burn the casinha or be caught before the penalty
       return;
     }
     this.lancha++;
@@ -1194,7 +1222,7 @@ export class Room {
         this.score[bt] = Math.max(0, this.score[bt] - 4);
         this.lancha = 0;
         this.ev({ k: 'msg', text: `Três na lancha: Time ${this.teamName(bt)} perde 4 pontos.` });
-      } else if (!this.pendingLose) this.pendingLose = { at: this.time + 0.8, text: 'Três na lancha! Perderam os tacos.' };
+      } else this.decideLose('Três na lancha! Perderam os tacos.');
     }
   }
 
@@ -1209,6 +1237,8 @@ export class Room {
     f.frozenUntil = this.time + 12;
     f.penaltyThrow = base;
     this.ball.holder = f.id;
+    // Until the penalty is taken nobody may run (no crossing while it is being set up).
+    this.penalty = { base, by: f.id, thrown: false };
     this.ev({ k: 'msg', text: `${f.name} cobra o pênalti de perto na casinha!` });
   }
 
@@ -1532,6 +1562,7 @@ export class Room {
     if (sp < 0.15 && b.y <= BALL_R + 0.01 && Math.abs(b.vy) < 0.1) b.restT += dt;
     else b.restT = 0;
     if (b.restT > 0.6 && b.lastTouch.kind !== 'hit') this.clearShoulders();
+    if (b.restT > 0.6 && this.penalty?.thrown) this.penalty = null;
   }
 
   // Returns true when the ball got picked up.
@@ -1591,6 +1622,8 @@ export class Room {
     if (out && !b.outside) this.ev({ k: 'msg', text: 'A bola foi para o mato! Lançadores podem gritar "PÁTIO" (P).' });
     b.outside = out;
 
+    // Dead ball (play already decided: lost tacos, waiting for a penalty): only physics.
+    if (b.dead) return false;
     const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy + b.vz * b.vz);
     const lt = b.lastTouch;
     const final = this.phase === 'final';
@@ -1630,13 +1663,32 @@ export class Room {
       // even in the middle of a swing.
       if (d < BODY_R && b.y < 1.75) {
         if (b.lanchaDone || speed < 2 || lt.kind === 'none') continue;
-        if (lt.kind === 'hit' && lt.by === p.id && this.time - lt.t < 0.4) continue;
         if (final) {
-          if (lt.kind === 'final') this.finalHit(p);
-          return true;
+          if (lt.kind === 'final') {
+            this.finalHit(p);
+            return true;
+          }
+          continue;
         }
-        if (lt.kind !== 'hit') this.lanchaHit(p);
-        else b.lanchaDone = true;
+        if (lt.kind === 'hit') {
+          // The batter's own hit leaving the bat, or a hit ball running into the partner.
+          if (lt.by === p.id && this.time - lt.t < 0.4) continue;
+          b.lanchaDone = true;
+          this.deflectOff(p);
+          continue;
+        }
+        // Lancha is about the *pitch* reaching the batter who defends the target ("o
+        // rebatedor do lado oposto do lançador"). In the "imediato" variant any batter
+        // touched by a pitch counts ("seja ele o oposto ou o que está rebatendo").
+        const isPitch = lt.kind === 'pitch' || lt.kind === 'reta';
+        const striker = isPitch && this.nearestBase(p) === lt.targetBase;
+        if (isPitch && (striker || this.rules.lanchaRule === 'imediato')) this.lanchaHit(p);
+        else {
+          // A fielder's return throw or the pitch brushing the batter at the pitcher's end:
+          // the ball just bounces off, no lancha.
+          b.lanchaDone = true;
+          this.deflectOff(p);
+        }
         continue;
       }
       // Bat contact only where the bat is: during the swing the bat sweeps from the
@@ -1713,6 +1765,7 @@ export class Room {
     b.restT = 0;
     b.retaChecked = false;
     p.swingHit = true;
+    this.penalty = null;
     this.clearShoulders();
     this.reta = null;
     this.ev({ k: 'hit', id: p.id, q: r2(q) });
@@ -1722,6 +1775,7 @@ export class Room {
   pickup(f) {
     const b = this.ball;
     b.holder = f.id;
+    if (this.penalty?.thrown) this.penalty = null;
     b.vx = b.vy = b.vz = 0;
     b.restT = 0;
     this.ev({ k: 'catch', id: f.id });
@@ -1772,6 +1826,8 @@ export class Room {
       if (this.reta) msg.re = { s: this.reta.state, x: r2(this.reta.x), z: r2(this.reta.z), h: this.reta.hitter };
       if (this.pause) msg.pa = { by: this.pause.by, name: this.pause.name, left: Math.max(0, Math.ceil(this.pause.until - this.time)) };
       if (this.phase === 'gameover') msg.win = { team: this.winner, text: this.winText };
+      if (this.pendingPenalty) msg.pen = { s: 'wait' };
+      else if (this.penalty) msg.pen = { s: this.penalty.thrown ? 'live' : 'armed', by: this.penalty.by, base: this.penalty.base };
       if (this.surrender) msg.sr = { team: this.surrender.team, by: this.surrender.by, name: this.surrender.name, partner: this.surrender.partner, left: Math.ceil(this.surrender.until - this.time) };
     }
     if (ev.length) msg.ev = ev;

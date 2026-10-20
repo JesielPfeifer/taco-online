@@ -45,8 +45,8 @@ ou vitória automática (conforme a região).</li>
 Marcar ponto desconta os "pra trás". Na pontuação máxima pode não ter "trás".</li>
 <li><b>Taco × corpo</b>: só vale rebatida quando a bola encontra o <b>taco</b> durante o giro. Bola que chega no corpo é lancha,
 mesmo no meio do giro.</li>
-<li><b>Lancha / carne</b>: a bola encostou no corpo do rebatedor. Três na lancha perde o taco (ou perde 4 pontos no PR,
-ou pênalti de perto no RS, ou perde na hora).</li>
+<li><b>Lancha / carne</b>: o <b>lançamento</b> encostou no corpo do rebatedor que defende a casinha (bola devolvida, rebatida ou quase parada não conta). Três na lancha perde o taco (ou perde 4 pontos no PR,
+ou pênalti de perto no RS: bola morta, ninguém corre e o lançador cobra a 4 m da casinha; ou perde na hora).</li>
 <li><b>Reta / bete-ombro</b>: a bola rebatida parou entre as casinhas — o lançador pede "reta" e arremessa de onde ela parou,
 com o rebatedor de taco no ombro. Se o rebatedor pedir "nada" antes, o lançador volta para trás da base.</li>
 <li><b>Pátio / bolinha perdida</b>: bola no mato (fora da cerca). Os rebatedores marcam até os lançadores gritarem "pátio";

@@ -1495,7 +1495,15 @@ function renderHud(s) {
   else if (s.ph === 'swap') status = 'Trocando os tacos...';
   else if (s.ph === 'final') status = '🏁 De pé sobre os tacos! Lançadores: um único arremesso de onde pegarem a bola.';
   else if (s.ph === 'playing') {
-    if (s.re?.s === 'avail') status = role === 'field' ? 'Bola parada entre as casinhas: R para pedir RETA' : role === 'bat' ? 'Bola parada entre as casinhas: N para pedir NADA' : 'Bola parada entre as casinhas';
+    if (s.pen?.s === 'wait') status = '⚽ Lancha! Preparando o pênalti…';
+    else if (s.pen?.s === 'armed')
+      status =
+        s.pen.by === state.myId
+          ? '⚽ PÊNALTI: mire na casinha e lance (segure e solte o clique)'
+          : role === 'bat'
+            ? '⚽ PÊNALTI de perto! Defenda a casinha — ninguém corre até o lançamento'
+            : '⚽ PÊNALTI de perto na casinha';
+    else if (s.re?.s === 'avail') status = role === 'field' ? 'Bola parada entre as casinhas: R para pedir RETA' : role === 'bat' ? 'Bola parada entre as casinhas: N para pedir NADA' : 'Bola parada entre as casinhas';
     else if (s.re) status = 'RETA! Lançamento de onde a bola parou — rebatedor com taco no ombro';
     else if (s.B[4]) status = role === 'field' ? 'Bola no mato! P para gritar "PÁTIO"' : 'Bola no mato! Corram enquanto não gritarem pátio';
     else if (s.rp) status = 'Cruzaram! Agora encostem o taco na base oposta';
