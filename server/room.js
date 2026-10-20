@@ -77,7 +77,14 @@ export class Room {
       rules: this.rules,
       ballSkin: this.ballSkin,
       seats: this.seats,
-      members: [...this.members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, bot: m.bot })),
+      members: [...this.members.values()].map((m) => ({
+        id: m.id,
+        name: m.name,
+        avatar: m.avatar,
+        bot: m.bot,
+        voice: !!(m.voice && m.client),
+        muted: !!m.muted,
+      })),
     };
   }
 
@@ -114,6 +121,7 @@ export class Room {
     const m = this.members.get(id);
     if (!m) return;
     if (m.client) m.client.room = null;
+    m.voice = false;
     const p = this.players?.get(id);
     if (this.phase !== 'lobby' && p) {
       // Keep the seat in the match: the avatar becomes "bete morto" and a bot takes over shortly.
@@ -228,6 +236,22 @@ export class Room {
           this.touchActivity(p);
         }
         p.input = { mx, mz, ax, az, sp: !!msg.sp };
+        p.charging = !!msg.ch && this.ball?.holder === p.id;
+        return;
+      }
+      case 'voice': {
+        const m = this.members.get(client.id);
+        if (!m) return;
+        m.voice = !!msg.on;
+        m.muted = !!msg.muted;
+        return this.broadcastRoom();
+      }
+      case 'rtc': {
+        // WebRTC signaling relay (SDP offers/answers and ICE candidates) between voice peers.
+        const from = this.members.get(client.id);
+        const to = this.members.get(String(msg.to || ''));
+        if (!from?.voice || !to?.client || !to.voice || typeof msg.data !== 'object') return;
+        to.client.send({ t: 'rtc', from: client.id, data: msg.data });
         return;
       }
       case 'act': {
@@ -793,6 +817,7 @@ export class Room {
     }
     p.retaThrow = null;
     p.penaltyThrow = null;
+    p.charging = false;
     p.frozen = false;
     p.frozenUntil = 0;
     const noise = (Math.random() - 0.5) * (0.025 + power * 0.07);
@@ -1355,7 +1380,8 @@ export class Room {
           (p.crossed ? 8 : 0) |
           (p.dead ? 16 : 0) |
           (p.frozen ? 32 : 0) |
-          (p.bot ? 64 : 0),
+          (p.bot ? 64 : 0) |
+          (p.charging && b.holder === p.id ? 128 : 0),
         r2(p.swingT),
         r2(hyp(p.vx, p.vz)),
         r2(this.time - p.throwAt),

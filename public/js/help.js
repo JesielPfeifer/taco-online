@@ -11,7 +11,12 @@ cruzando os tacos no meio do campo; os lançadores tentam derrubar a casinha (tr
 <kbd>N</kbd> "nada" · <kbd>L</kbd> licença</li>
 <li><b>Lançador</b>: segure <kbd>Clique</kbd> para carregar a força e solte para lançar · <kbd>F</kbd> ou botão direito: queimar na mão ·
 <kbd>R</kbd> "reta" · <kbd>P</kbd> "pátio"</li>
-<li><kbd>T</kbd> pedir tempo · <kbd>V</kbd> câmera geral · roda do mouse: zoom · <kbd>Enter</kbd> conversar · <kbd>M</kbd> som · <kbd>H</kbd> esta ajuda</li>
+<li><b>Câmera</b>: clique no campo para prender o mouse — mexer o mouse gira a câmera e a mira vira o círculo no centro da tela
+(<kbd>Esc</kbd> solta). <kbd>Q</kbd>/<kbd>E</kbd> giram pelo teclado, <kbd>X</kbd> dá meia-volta, <kbd>C</kbd> alterna 1ª/3ª pessoa,
+<kbd>V</kbd> mostra o campo todo, roda do mouse dá zoom. A câmera segue atrás do boneco na corrida e, parado na base, vira sozinha para o campo.</li>
+<li><kbd>T</kbd> pedir tempo · <kbd>Enter</kbd> conversar · <kbd>M</kbd> som · <kbd>B</kbd> liga/desliga o microfone · <kbd>H</kbd> esta ajuda</li>
+<li><b>Chat de voz</b>: botão 🎤 na sala ou no canto da partida. Durante o jogo a voz é por proximidade: quanto mais longe o boneco, mais baixo.
+Precisa de HTTPS (ou localhost) para o navegador liberar o microfone.</li>
 </ul>
 
 <h4>Como funciona</h4>

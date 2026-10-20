@@ -16,6 +16,7 @@ import { drawBallSkin } from './skins.js';
 import { World } from './scene.js';
 import { sfx, setMuted, isMuted } from './audio.js';
 import { HELP_HTML } from './help.js';
+import { VoiceChat } from './voice.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -31,7 +32,11 @@ const state = {
   local: null,
   keys: new Set(),
   mouse: { nx: 0, ny: 0, down: false, chargeStart: 0 },
+  locked: false, // pointer lock: mouse turns the camera, aim = crosshair
+  lastLook: 0, // last time the player turned the camera by hand
+  yawGoal: null, // smooth turn target (X key, start of innings)
 };
+const voice = new VoiceChat((m) => send(m), () => renderVoice());
 
 function loadProfile() {
   try {
@@ -65,6 +70,7 @@ function connect() {
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onclose = () => {
     toast('Conexão perdida. Reconectando...');
+    voice.leave();
     state.room = null;
     showScreen('menu');
     setTimeout(connect, reconnectDelay);
@@ -89,7 +95,11 @@ function onMessage(m) {
     case 'err':
       toast(m.msg);
       break;
+    case 'rtc':
+      voice.signal(m.from, m.data);
+      break;
     case 'left':
+      voice.leave();
       state.room = null;
       showScreen('menu');
       history.replaceState(null, '', '/');
@@ -286,6 +296,8 @@ function onRoom(m) {
   state.room = m;
   state.members = new Map(m.members.map((x) => [x.id, { ...x, team: teamOf(x.id) }]));
   history.replaceState(null, '', `/?sala=${m.code}`);
+  voice.sync(state.myId, m.members);
+  renderVoice();
   if (m.phase === 'lobby') {
     showScreen('lobby');
     renderLobby();
@@ -409,6 +421,39 @@ function addChat(from, text) {
   }
 }
 
+// ------------------------------------------------------------------ voice chat UI
+function renderVoice() {
+  const members = state.room?.members || [];
+  const inVoice = members.filter((m) => m.voice);
+  const list = inVoice
+    .map((m) => {
+      const icon = m.muted ? '🔇' : voice.speaking(m.id) ? '🔊' : '🎙️';
+      const far = m.id !== state.myId && voice.on && (voice.peers.get(m.id)?.distGain ?? 1) < 0.05 ? ' <span class="muted">(longe)</span>' : '';
+      const linking = m.id !== state.myId && voice.on && !voice.connected(m.id) ? ' <span class="muted">(conectando…)</span>' : '';
+      return `<div class="${voice.speaking(m.id) && !m.muted ? 'talking' : ''}">${icon} ${esc(m.name)}${far}${linking}</div>`;
+    })
+    .join('');
+  const html = `<div class="voice-row"><button data-voice-join>${voice.on ? '📴 Sair da voz' : '🎤 Entrar na voz'}</button>${
+    voice.on ? `<button data-voice-mute>${voice.muted ? '🔇 Mudo (B)' : '🎙️ Mic ligado (B)'}</button>` : ''
+  }</div><div class="voice-list">${list || '<span class="muted">Ninguém na voz</span>'}</div>`;
+  for (const el of document.querySelectorAll('.voice-box')) {
+    el.innerHTML = html;
+    el.querySelector('[data-voice-join]').onclick = toggleVoice;
+    el.querySelector('[data-voice-mute]')?.addEventListener('click', () => voice.toggleMute());
+  }
+}
+
+async function toggleVoice() {
+  if (voice.on) return voice.leave();
+  try {
+    await voice.join();
+    voice.sync(state.myId, state.room?.members || []);
+    toast('Chat de voz ligado — a voz fica mais baixa conforme a distância no campo');
+  } catch (err) {
+    toast(err.message || 'Não foi possível acessar o microfone');
+  }
+}
+
 function setupLobby() {
   $('#leaveLobby').onclick = () => send({ t: 'leave' });
   $('#copyLink').onclick = async () => {
@@ -511,20 +556,89 @@ function frameContext(dt) {
     L.x += (mp[1] - L.x) * Math.min(1, dt * 3);
     L.z += (mp[2] - L.z) * Math.min(1, dt * 3);
     L.speed = Math.hypot(L.vx, L.vz);
-    const aim = state.world.aim;
+    updateCameraYaw(dt, L, mp, ph);
+    const w = state.world;
+    if (state.locked || w.mode === 'first') w.aimFromCenter(L);
+    else w.screenToGround(state.mouse.nx, state.mouse.ny);
+    const aim = w.aim;
     if (Math.hypot(aim.x - L.x, aim.z - L.z) > 0.3) L.rot = Math.atan2(aim.x - L.x, aim.z - L.z);
-    state.world.screenToGround(state.mouse.nx, state.mouse.ny);
   } else state.local = null;
 
   const role = myRole();
   const holding = mp && mp[4] & 1;
+  $('#crosshair').classList.toggle('on', !!mp && !state.world.overview && (state.locked || state.world.mode === 'first'));
+  $('#lockHint').classList.toggle('off', state.locked || !mp || ph === 'decide' || ph === 'gameover');
+  updateVoiceSpatial();
   return {
+    myCharging: holding ? state.mouse.down : null,
     local: state.local,
     battingTeam: s?.bt,
     celebrateTeam: ph === 'gameover' ? s?.win?.team : null,
     showAim: (role === 'field' && holding) || role === 'bat',
     protectedBases: protectedBases(),
   };
+}
+
+const TURN_SPEED = 2.4; // rad/s for Q/E
+function wrapAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+// The camera yaw is continuous: it stays behind the player while running across the
+// middle (no more flipping at z = 0). It only turns by itself in two calm moments:
+// at the start of an innings, and when the player is standing still at a base/post
+// without touching the camera — then it eases to face the field.
+function updateCameraYaw(dt, L, mp, ph) {
+  const w = state.world;
+  const k = state.keys;
+  if (k.has('KeyQ')) {
+    w.yaw += TURN_SPEED * dt;
+    state.lastLook = performance.now();
+    state.yawGoal = null;
+  }
+  if (k.has('KeyE')) {
+    w.yaw -= TURN_SPEED * dt;
+    state.lastLook = performance.now();
+    state.yawGoal = null;
+  }
+  if (ph !== lastYawPhase) {
+    if (ph === 'intro') state.yawGoal = faceFieldYaw(L);
+    lastYawPhase = ph;
+  }
+  const idle = L.speed < 0.3 && performance.now() - state.lastLook > 1500;
+  if (state.yawGoal == null && idle && ph === 'playing' && state.room) {
+    const half = state.room.rules.baseDistance / 2;
+    const atBase = Math.abs(Math.abs(L.z) - half) < 2.8 && Math.abs(L.x) < 3;
+    if (atBase) {
+      const goal = faceFieldYaw(L);
+      if (Math.abs(wrapAngle(goal - w.yaw)) > 0.05) w.yaw += wrapAngle(goal - w.yaw) * Math.min(1, dt * 2.2);
+    }
+  }
+  if (state.yawGoal != null) {
+    const d = wrapAngle(state.yawGoal - w.yaw);
+    w.yaw += d * Math.min(1, dt * 6);
+    if (Math.abs(d) < 0.02) state.yawGoal = null;
+  }
+  w.yaw = wrapAngle(w.yaw);
+}
+let lastYawPhase = null;
+
+// Yaw that looks from the player's position down the pitch, towards the other base.
+function faceFieldYaw(L) {
+  const half = (state.room?.rules.baseDistance || 10) / 2;
+  const targetZ = L.z < 0 ? half : -half;
+  return Math.atan2(-L.x * 0.6, targetZ - L.z);
+}
+
+function updateVoiceSpatial() {
+  if (!voice.on) return;
+  const s = state.snap;
+  const proximity = state.room?.phase !== 'lobby' && s?.P && state.local && !state.world?.overview;
+  const pos = new Map();
+  if (s?.P) for (const p of s.P) pos.set(p[0], { x: p[1], z: p[2] });
+  voice.updateSpatial(proximity ? { x: state.local.x, z: state.local.z, yaw: state.world.yaw } : null, pos);
 }
 
 function protectedBases() {
@@ -557,6 +671,7 @@ function sendInput() {
     ax: +aim.x.toFixed(2),
     az: +aim.z.toFixed(2),
     sp: state.keys.has('ShiftLeft') || state.keys.has('ShiftRight'),
+    ch: state.mouse.down,
   });
 }
 
@@ -574,6 +689,7 @@ function setupInput() {
   window.addEventListener('keydown', (e) => {
     if (!$('#game').classList.contains('active') || chatFocused()) return;
     if (e.code === 'Enter') {
+      document.exitPointerLock?.();
       $('#gameChatInput').focus();
       e.preventDefault();
       return;
@@ -610,6 +726,19 @@ function setupInput() {
       case 'KeyV':
         state.world.overview = !state.world.overview;
         break;
+      case 'KeyC':
+        state.world.mode = state.world.mode === 'first' ? 'third' : 'first';
+        state.world.overview = false;
+        toast(state.world.mode === 'first' ? 'Primeira pessoa' : 'Terceira pessoa');
+        break;
+      case 'KeyX':
+        // Quick about-turn (e.g. after crossing to the other base).
+        state.yawGoal = wrapAngle(state.world.yaw + Math.PI);
+        state.lastLook = performance.now();
+        break;
+      case 'KeyB':
+        if (voice.on) voice.toggleMute();
+        break;
       case 'KeyM':
         setMuted(!isMuted());
         toast(isMuted() ? 'Som desligado' : 'Som ligado');
@@ -627,9 +756,26 @@ function setupInput() {
     state.mouse.ny = -((e.clientY - r.top) / r.height) * 2 + 1;
   });
   vp.addEventListener('contextmenu', (e) => e.preventDefault());
+  document.addEventListener('pointerlockchange', () => {
+    state.locked = document.pointerLockElement === vp;
+    if (!state.locked) state.mouse.down = false;
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!state.locked || !state.world) return;
+    const w = state.world;
+    w.yaw = wrapAngle(w.yaw - e.movementX * 0.0035);
+    w.pitch = Math.max(-0.35, Math.min(1.25, w.pitch + e.movementY * 0.0028));
+    state.lastLook = performance.now();
+    state.yawGoal = null;
+  });
   vp.addEventListener('pointerdown', (e) => {
     sfx.unlock();
     document.activeElement?.blur?.();
+    if (!state.locked && myPlayer() && vp.requestPointerLock) {
+      // First click only grabs the mouse; the next ones play.
+      vp.requestPointerLock();
+      return;
+    }
     const role = myRole();
     if (e.button === 2) {
       act('touch');
@@ -686,6 +832,8 @@ function onSnapshot(s) {
   if (s.ph !== lastPhase) {
     lastPhase = s.ph;
     state.mouse.down = false;
+    // Modals need the cursor back.
+    if (['decide', 'paused', 'gameover'].includes(s.ph) && state.locked) document.exitPointerLock?.();
   }
   renderHud(s);
 }
@@ -762,10 +910,10 @@ function renderHud(s) {
   }
   $('#status').textContent = status;
 
+  const cam = ' · <kbd>Mouse</kbd>/<kbd>Q</kbd><kbd>E</kbd> girar · <kbd>X</kbd> virar · <kbd>C</kbd> 1ª pessoa · <kbd>H</kbd> ajuda';
   const keys = {
-    bat: '<kbd>WASD</kbd> mover · <kbd>Shift</kbd> correr · <kbd>Clique</kbd> rebater · <kbd>Espaço</kbd> bater os tacos · <kbd>N</kbd> nada · <kbd>L</kbd> licença · <kbd>T</kbd> tempo · <kbd>V</kbd> câmera · <kbd>H</kbd> regras',
-    field:
-      '<kbd>WASD</kbd> mover · <kbd>Shift</kbd> correr · <kbd>Segure/solte clique</kbd> lançar · <kbd>F</kbd>/<kbd>botão direito</kbd> queimar na mão · <kbd>R</kbd> reta · <kbd>P</kbd> pátio · <kbd>T</kbd> tempo · <kbd>H</kbd> regras',
+    bat: '<kbd>WASD</kbd> mover · <kbd>Shift</kbd> correr · <kbd>Clique</kbd> rebater · <kbd>Espaço</kbd> bater os tacos · <kbd>N</kbd> nada · <kbd>L</kbd> licença' + cam,
+    field: '<kbd>WASD</kbd> mover · <kbd>Shift</kbd> correr · <kbd>Segure/solte clique</kbd> lançar · <kbd>F</kbd> queimar · <kbd>R</kbd> reta · <kbd>P</kbd> pátio' + cam,
     spec: '<kbd>V</kbd> câmera · <kbd>H</kbd> regras · <kbd>Enter</kbd> conversar',
   }[role];
   $('#keys').innerHTML = keys;
@@ -985,4 +1133,5 @@ class BalanceGame {
 setupMenu();
 setupLobby();
 setupInput();
+window.__taco = { state, voice }; // debug handle (inspect in the browser console)
 connect();

@@ -46,6 +46,9 @@ export function botThink(room, p, dt) {
   }
   if (p.team === room.battingTeam) batter(room, p, dt);
   else fielder(room, p, dt);
+  // Show the wind-up (cocking pose) for a moment before a planned throw.
+  const ai = p.ai;
+  p.charging = room.ball.holder === p.id && ai.throwAt != null && room.time > ai.throwAt - 0.45;
 }
 
 function fielder(room, p) {

@@ -73,48 +73,57 @@ export function buildAvatar(cfg) {
   const legL = leg(1);
   const legR = leg(-1);
 
-  // ---- torso
-  const torso = mesh(capsule(0.2, 0.32), shirt, 0, 1.13, 0);
+  // ---- upper body: one pivot at the hips so the trunk can twist and lean
+  const upper = new THREE.Group();
+  upper.position.y = 0.84;
+  body.add(upper);
+  const torso = mesh(capsule(0.2, 0.32), shirt, 0, 0.29, 0);
   torso.scale.set(1, 1, 0.68);
-  body.add(torso);
-  if (build.belly) body.add(mesh(sphere(0.2), shirt, 0, 1.02, 0.08));
-  if (cfg.shirt === 5) body.add(mesh(box(0.22, 0.05, 0.16), shirt, 0, 1.4, 0.04)); // polo collar
+  upper.add(torso);
+  if (build.belly) upper.add(mesh(sphere(0.2), shirt, 0, 0.18, 0.08));
+  if (cfg.shirt === 5) upper.add(mesh(box(0.22, 0.05, 0.16), shirt, 0, 0.56, 0.04)); // polo collar
   if (cfg.shirt === 7) {
-    const hood = mesh(new THREE.TorusGeometry(0.13, 0.05, 6, 10), shirt, 0, 1.43, -0.06);
+    const hood = mesh(new THREE.TorusGeometry(0.13, 0.05, 6, 10), shirt, 0, 0.59, -0.06);
     hood.rotation.x = Math.PI / 2.4;
-    body.add(hood);
+    upper.add(hood);
   }
-  body.add(mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.1, 8), skin, 0, 1.45, 0));
+  upper.add(mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.1, 8), skin, 0, 0.61, 0));
   const neckwear = necklace(cfg.necklace);
-  if (neckwear) body.add(neckwear);
+  if (neckwear) {
+    neckwear.position.y -= 0.84;
+    upper.add(neckwear);
+  }
 
-  // ---- arms (pivot at shoulder)
+  // ---- arms: shoulder pivot -> upper arm -> elbow pivot -> forearm -> hand
   const sleeveMat = cfg.shirt === 2 ? skin : shirt;
   function arm(side) {
     const g = new THREE.Group();
     g.rotation.order = 'YXZ';
-    g.position.set(0.27 * side, 1.37, 0);
+    g.position.set(0.27 * side, 0.53, 0);
     g.add(mesh(capsule(0.062, 0.17), sleeveMat, 0, -0.12, 0));
-    g.add(mesh(capsule(0.055, 0.2), cfg.shirt === 7 ? shirt : skin, 0, -0.38, 0));
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.26;
+    g.add(elbow);
+    elbow.add(mesh(capsule(0.055, 0.2), cfg.shirt === 7 ? shirt : skin, 0, -0.12, 0));
     const hand = new THREE.Group();
-    hand.position.set(0, -0.56, 0);
+    hand.position.set(0, -0.3, 0);
     hand.add(mesh(sphere(0.06, 8, 6), skin));
-    g.add(hand);
-    body.add(g);
-    return { g, hand };
+    elbow.add(hand);
+    upper.add(g);
+    return { g, elbow, hand };
   }
   const armL = arm(1);
   const armR = arm(-1);
   const w = watch(cfg.watch);
   if (w) {
-    w.position.set(0, -0.47, 0);
-    armL.g.add(w);
+    w.position.set(0, -0.21, 0);
+    armL.elbow.add(w);
   }
 
   // ---- head
   const head = new THREE.Group();
-  head.position.set(0, 1.68, 0);
-  body.add(head);
+  head.position.set(0, 0.84, 0);
+  upper.add(head);
   const skull = mesh(new THREE.IcosahedronGeometry(0.19, 1), skin);
   skull.scale.set(1, 1.08, 1);
   head.add(skull);
@@ -147,58 +156,57 @@ export function buildAvatar(cfg) {
   const handBall = mesh(sphere(0.07), mat('#d4f03c'), 0, -0.04, 0.05);
   armR.hand.add(handBall);
 
-  const anim = { phase: Math.random() * 6 };
+  const anim = { phase: Math.random() * 6, chargeT: 0, charging: false };
+
+  function applyPose(p) {
+    upper.rotation.set(p.lean || 0, p.twist || 0, 0);
+    armR.g.rotation.set(p.rx || 0, p.ry || 0, p.rz ?? -0.08);
+    armR.elbow.rotation.x = p.re || 0;
+    armL.g.rotation.set(p.lx || 0, p.ly || 0, p.lz ?? 0.08);
+    armL.elbow.rotation.x = p.le || 0;
+    legL.rotation.x = p.gl || 0;
+    legR.rotation.x = p.gr || 0;
+    bat.rotation.set(p.bat || 0, 0, 0);
+    body.position.y = p.bob || 0;
+    body.rotation.x = p.tilt || 0;
+  }
 
   function update(st, dt) {
     const sp = Math.min(1, (st.speed || 0) / 5.5);
     anim.phase += dt * (4 + (st.speed || 0) * 1.6);
-    const swingLeg = Math.sin(anim.phase) * 0.7 * sp;
-    legL.rotation.x = swingLeg;
-    legR.rotation.x = -swingLeg;
-    body.position.y = Math.abs(Math.sin(anim.phase)) * 0.05 * sp;
-    body.rotation.x = 0;
+    const s = Math.sin(anim.phase) * 0.7 * sp;
     bat.visible = !!st.batting;
     handBall.visible = !!st.holding;
+    if (st.charging && !anim.charging) anim.chargeT = 0;
+    anim.charging = !!st.charging;
+    if (anim.charging) anim.chargeT += dt;
 
-    armL.g.rotation.set(-swingLeg * 0.8, 0, 0.08);
-    armR.g.rotation.set(swingLeg * 0.8, 0, -0.08);
-    bat.rotation.set(0, 0, 0);
+    // Base locomotion: legs swing, arms counter-swing, elbows soft while running.
+    const walk = { gl: s, gr: -s, lx: -s * 0.8, rx: s * 0.8, le: -0.35 * sp, re: -0.35 * sp, bob: Math.abs(Math.sin(anim.phase)) * 0.05 * sp };
+    let pose = walk;
 
     if (st.celebrate) {
-      armL.g.rotation.set(-2.9 + Math.sin(anim.phase * 2) * 0.2, 0, 0.3);
-      armR.g.rotation.set(-2.9 - Math.sin(anim.phase * 2) * 0.2, 0, -0.3);
-      body.position.y = Math.abs(Math.sin(anim.phase * 1.5)) * 0.25;
-      return;
-    }
-    if (st.dead) {
-      body.position.y = -0.25;
-      body.rotation.x = 0.25;
-      armR.g.rotation.set(0.2, 0, -0.3);
-      armL.g.rotation.set(0.2, 0, 0.3);
-      return;
-    }
-    if (st.batting) {
-      if (st.swingT >= 0) {
-        const t = Math.min(1, st.swingT / 0.36);
-        armR.g.rotation.set(-1.45, 1.4 - t * 3.1, 0);
-        armL.g.rotation.set(-1.2, 0.9 - t * 2.4, 0);
-        bat.rotation.x = -0.25;
-      } else if (st.shoulder) {
-        armR.g.rotation.set(-2.5, 0, -0.2);
-        bat.rotation.set(2.6, 0, 0);
-      } else if (sp > 0.25) {
-        armR.g.rotation.set(-0.9 + swingLeg * 0.3, 0, -0.1);
-        bat.rotation.x = -0.4;
-      } else {
-        armR.g.rotation.set(-0.12, 0, -0.06); // taco no chão
-        bat.rotation.x = 0.05;
-      }
-    } else if (st.throwAge != null && st.throwAge < 0.35) {
-      const t = st.throwAge / 0.35;
-      armR.g.rotation.set(-2.8 + t * 2.4, 0, -0.1);
+      const w2 = Math.sin(anim.phase * 2) * 0.2;
+      pose = { lx: -2.9 + w2, lz: 0.3, rx: -2.9 - w2, rz: -0.3, bob: Math.abs(Math.sin(anim.phase * 1.5)) * 0.25 };
+    } else if (st.dead) {
+      pose = { bob: -0.25, tilt: 0.25, rx: 0.2, rz: -0.3, lx: 0.2, lz: 0.3 };
+    } else if (st.batting) {
+      if (st.swingT >= 0) pose = sampleTrack(SWING, st.swingT);
+      else if (st.shoulder) pose = { ...walk, rx: -2.6, rz: -0.25, re: -0.9, bat: 2.3 };
+      else if (sp > 0.25) pose = { ...walk, rx: -0.9 + s * 0.3, re: -0.4, bat: -0.3 };
+      else pose = { rx: -0.12, rz: -0.06, bat: 0.05, lx: 0.05 }; // taco no chão
+    } else if (st.throwAge != null && st.throwAge < THROW_END) {
+      pose = sampleTrack(THROW, st.throwAge);
+    } else if (st.holding && anim.charging) {
+      pose = sampleTrack(CHARGE, anim.chargeT);
     } else if (st.holding) {
-      armR.g.rotation.set(-0.7, 0, -0.1);
+      pose = { ...walk, rx: -0.6 + s * 0.3, re: -0.6 };
     }
+    // Keep the legs running under an upper-body action.
+    if (pose !== walk && sp > 0.3 && !st.celebrate && !st.dead) {
+      pose = { ...pose, gl: s, gr: -s, bob: walk.bob };
+    }
+    applyPose(pose);
   }
 
   function setBallSkin(skinName) {
@@ -214,6 +222,52 @@ export function buildAvatar(cfg) {
   }
 
   return { root, body, head, update, setBallSkin };
+}
+
+// ------------------------------------------------------------------ key poses
+// Overhand throw split into the classic phases: wind-up (lead knee up), stride + arm
+// cocking (ball behind the head, trunk turned away), acceleration, release (ball near ear
+// level, trunk turned to the target) and deceleration / follow-through (arm across the body).
+// Keys: twist/lean = trunk, r*/l* = right/left shoulder (x,y,z) and elbow (e), gl/gr = hips.
+const POSE_HOLD = { rx: -0.6, re: -0.6, lx: -0.15 };
+const CHARGE = [
+  [0, POSE_HOLD],
+  [0.18, { twist: -0.35, rx: -0.3, re: -0.3, lx: -1.2, le: -0.5, gl: -1.0, gr: 0.05 }], // wind-up: knee lift
+  [0.4, { twist: -0.8, lean: -0.05, rx: -3.5, rz: -0.45, re: -1.7, lx: -1.5, lz: 0.25, le: -0.2, gl: -0.4, gr: 0.25 }], // cocked
+];
+const THROW = [
+  [0, { twist: -0.6, rx: -3.4, rz: -0.45, re: -1.5, lx: -1.4, lz: 0.3, le: -0.3, gl: -0.45, gr: 0.3 }],
+  [0.06, { twist: 0.1, lean: 0.12, rx: -2.6, rz: -0.3, re: -0.7, lx: -0.9, lz: 0.5, le: -1.0, gl: -0.5, gr: 0.4 }], // acceleration
+  [0.12, { twist: 0.5, lean: 0.28, rx: -1.7, rz: -0.1, re: -0.1, lx: -0.4, lz: 0.6, le: -1.4, gl: -0.5, gr: 0.6 }], // release
+  [0.32, { twist: 0.75, lean: 0.45, rx: -0.5, ry: 0.25, rz: 0.55, re: -0.3, lx: 0.2, lz: 0.4, le: -1.2, gl: -0.4, gr: 0.95 }], // follow-through
+  [0.6, POSE_HOLD],
+];
+const THROW_END = 0.6;
+// Bat swing timed to the server contact window (sweet spot at 0.17 s).
+const SWING = [
+  [0, { twist: -0.95, rx: -1.35, ry: 1.3, re: -0.5, lx: -1.25, ly: 1.15, le: -0.7, gl: -0.15, gr: 0.15, bat: -0.35 }],
+  [0.17, { twist: 0.1, rx: -1.5, ry: 0, re: -0.05, lx: -1.45, ly: 0.1, le: -0.3, gl: -0.35, gr: 0.25, bat: -0.15 }],
+  [0.34, { twist: 1.05, lean: 0.1, rx: -1.7, ry: -1.4, re: -0.6, lx: -1.25, ly: -1.05, le: -0.9, gl: -0.3, gr: 0.45, bat: -0.7 }],
+  [0.45, { rx: -0.12, rz: -0.06, bat: 0.05 }],
+];
+
+function sampleTrack(track, t) {
+  if (t <= track[0][0]) return track[0][1];
+  for (let i = 1; i < track.length; i++) {
+    const [t1, b] = track[i];
+    if (t <= t1) {
+      const [t0, a] = track[i - 1];
+      let f = (t - t0) / (t1 - t0);
+      f = f * f * (3 - 2 * f); // smoothstep
+      const out = {};
+      for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        const def = k === 'rz' ? -0.08 : k === 'lz' ? 0.08 : 0;
+        out[k] = (a[k] ?? def) + ((b[k] ?? def) - (a[k] ?? def)) * f;
+      }
+      return out;
+    }
+  }
+  return track[track.length - 1][1];
 }
 
 // ------------------------------------------------------------------ parts

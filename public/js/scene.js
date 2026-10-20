@@ -22,6 +22,9 @@ export class World {
     this.camera.position.set(0, 12, -16);
     this.camDist = 1;
     this.overview = false;
+    this.mode = 'third';
+    this.yaw = 0;
+    this.pitch = 0.32;
 
     const hemi = new THREE.HemisphereLight('#ffffff', '#4a6b3a', 0.9);
     this.scene.add(hemi);
@@ -354,6 +357,10 @@ export class World {
           z = me.z;
           rot = me.rot;
         }
+        // In first person my own body would block the view.
+        const hideMe = pb[0] === this.myId && this.mode === 'first' && !this.overview;
+        av.av.root.visible = !hideMe;
+        av.label.visible = !hideMe;
         av.x = x;
         av.z = z;
         av.av.root.position.set(x, 0, z);
@@ -370,6 +377,7 @@ export class World {
             dead: !!(flags & 16),
             batting,
             throwAge: pb[7],
+            charging: pb[0] === this.myId && ctx.myCharging != null ? ctx.myCharging : !!(flags & 128),
             celebrate: ctx.celebrateTeam === av.team,
           },
           dt,
@@ -429,34 +437,69 @@ export class World {
     this.renderer.render(this.scene, this.camera);
   }
 
+  // Camera modes: 'third' (chase camera behind the player), 'first' (eyes of the
+  // avatar) and the field overview (V). yaw/pitch belong to the camera and are kept
+  // continuously, so crossing the middle of the field never flips the view.
   updateCamera(dt, me) {
     const cam = this.camera;
-    let target;
-    let pos;
     if (this.overview || !me) {
-      target = new THREE.Vector3(0, 0, 0);
-      pos = new THREE.Vector3(-26 * this.camDist, 22 * this.camDist, 0);
-    } else {
-      // Look down the pitch from the player's own side of the field.
-      if (Math.abs(me.z) > 0.8) this.side = Math.sign(me.z);
-      const s = this.side || -1;
-      const d = this.camDist;
-      target = new THREE.Vector3(me.x * 0.7, 0.8, me.z - s * 6);
-      pos = new THREE.Vector3(me.x * 0.85, 7.5 * d, me.z + s * 9.5 * d);
+      const pos = new THREE.Vector3(-26 * this.camDist, 22 * this.camDist, 0);
+      cam.position.lerp(pos, Math.min(1, dt * 4));
+      cam.lookAt(0, 0, 0);
+      this.camTarget = null;
+      return;
     }
-    const k = Math.min(1, dt * 5);
-    cam.position.lerp(pos, k);
-    this.camTarget = this.camTarget ? this.camTarget.lerp(target, k) : target;
-    cam.lookAt(this.camTarget);
+    const dir = this.lookDir();
+    if (this.mode === 'first') {
+      const fx = Math.sin(this.yaw);
+      const fz = Math.cos(this.yaw);
+      cam.position.set(me.x + fx * 0.18, 1.62, me.z + fz * 0.18);
+      cam.lookAt(cam.position.clone().add(dir));
+      this.camTarget = null;
+      return;
+    }
+    // Over-the-shoulder pivot slightly to the right so the crosshair is not hidden.
+    const right = new THREE.Vector3(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
+    const pivot = new THREE.Vector3(me.x, 1.55, me.z).addScaledVector(right, 0.45);
+    const dist = 4.6 * this.camDist;
+    const pos = pivot.clone().addScaledVector(dir, -dist);
+    pos.y = Math.max(0.4, pos.y);
+    // Follow position tightly (no lag while sprinting), smooth only the small corrections.
+    cam.position.lerp(pos, Math.min(1, dt * 18));
+    cam.lookAt(cam.position.clone().add(dir));
   }
 
-  // Unit vectors for "forward"/"right" on the ground as seen from the camera.
+  lookDir() {
+    const cp = Math.cos(this.pitch);
+    return new THREE.Vector3(Math.sin(this.yaw) * cp, -Math.sin(this.pitch), Math.cos(this.yaw) * cp);
+  }
+
+  // Aim point = where the centre of the screen (crosshair) meets the ground.
+  aimFromCenter(me) {
+    if (this.overview || !me) return this.aim;
+    this.raycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
+    const p = new THREE.Vector3();
+    const hit = this.raycaster.ray.intersectPlane(this.groundPlane, p);
+    const fx = Math.sin(this.yaw);
+    const fz = Math.cos(this.yaw);
+    if (!hit || Math.hypot(p.x - me.x, p.z - me.z) > 40 || (p.x - me.x) * fx + (p.z - me.z) * fz < 0.5) {
+      p.set(me.x + fx * 40, 0, me.z + fz * 40);
+    }
+    this.aim.copy(p);
+    return this.aim;
+  }
+
+  // Unit vectors for "forward"/"right" on the ground, from the camera yaw.
   cameraBasis() {
-    const f = new THREE.Vector3();
-    this.camera.getWorldDirection(f);
-    f.y = 0;
-    f.normalize();
-    const r = new THREE.Vector3(-f.z, 0, f.x);
+    if (this.overview) {
+      const f = new THREE.Vector3();
+      this.camera.getWorldDirection(f);
+      f.y = 0;
+      f.normalize();
+      return { f, r: new THREE.Vector3(-f.z, 0, f.x) };
+    }
+    const f = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    const r = new THREE.Vector3(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
     return { f, r };
   }
 }

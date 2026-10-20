@@ -626,6 +626,62 @@ kbd {
   width: 300px;
   height: 220px;
 }
+.voice-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.voice-row button {
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+.voice-list {
+  font-size: 0.85rem;
+  margin: 6px 0;
+}
+.voice-list .talking {
+  color: var(--ok);
+  font-weight: 700;
+}
+#voiceHud {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  background: rgba(10, 16, 12, 0.75);
+  padding: 8px;
+  border-radius: 10px;
+  pointer-events: auto;
+  max-width: 260px;
+}
+#crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid #ffd23f;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #000;
+  display: none;
+}
+#crosshair.on {
+  display: block;
+}
+#lockHint {
+  position: absolute;
+  top: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 16, 12, 0.7);
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+#lockHint.off {
+  display: none;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
