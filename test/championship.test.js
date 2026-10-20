@@ -92,6 +92,8 @@ test('F5: o mesmo jogador volta para o seu lugar em campo, não como espectador'
   lobby.handle(ana, { t: 'create' });
   const room = ana.room;
   clearInterval(room.timer);
+  const beto = fakeClient(lobby, 'Beto'); // someone stays connected, so the match keeps running
+  lobby.handle(beto, { t: 'join', code: room.code });
   room.rules.startMethod = 'aleatorio';
   lobby.handle(ana, { t: 'start' });
   const seatId = ana.id;
@@ -109,4 +111,86 @@ test('F5: o mesmo jogador volta para o seu lugar em campo, não como espectador'
   assert.equal(room.players.get(seatId).bot, false);
   assert.ok(inbox.some((m) => m.t === 'welcome' && m.id === seatId));
   assert.ok(room.seats.flat().includes(seatId));
+});
+
+test('ninguém conectado: a partida congela; quem entra assume a vaga de um bot', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taco-'));
+  const lobby = new Lobby(new Store(dir));
+  const ana = fakeClient(lobby, 'Ana');
+  lobby.handle(ana, { t: 'create' });
+  const room = ana.room;
+  clearInterval(room.timer);
+  room.rules.startMethod = 'aleatorio';
+  lobby.handle(ana, { t: 'start' });
+  room.leave(ana.id, true);
+  const t0 = room.time;
+  for (let i = 0; i < 120; i++) room.tick();
+  assert.equal(room.time, t0, 'sem humanos o tempo não anda');
+  clearTimeout(room.emptyTimer);
+  // A different person joins mid-game: plays instead of watching bots.
+  const caio = fakeClient(lobby, 'Caio');
+  lobby.handle(caio, { t: 'join', code: room.code });
+  assert.ok(room.seats.flat().includes(caio.id), 'Caio ganhou uma vaga');
+  assert.equal(room.players.get(caio.id).bot, false);
+});
+
+test('F5 atrás de proxy: a conexão antiga ainda aberta é substituída pela nova', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taco-'));
+  const lobby = new Lobby(new Store(dir));
+  const ana = fakeClient(lobby, 'Ana');
+  lobby.handle(ana, { t: 'create' });
+  const room = ana.room;
+  clearInterval(room.timer);
+  room.rules.startMethod = 'aleatorio';
+  lobby.handle(ana, { t: 'start' });
+  const seatId = ana.id;
+  let closed = false;
+  ana.ws.close = () => (closed = true);
+  // New tab/reload arrives while the old socket is still "open".
+  lobby.connect({ readyState: 1, send() {}, on() {} });
+  const again = [...lobby.clients.values()].at(-1);
+  lobby.handle(again, { t: 'profile', name: 'Ana', key: ana.key, avatar: {} });
+  lobby.handle(again, { t: 'join', code: room.code });
+  assert.equal(again.id, seatId);
+  assert.ok(closed, 'conexão antiga fechada');
+  assert.equal(room.members.get(seatId).client, again);
+});
+
+test('rendição com uma só pessoa (resto bots) encerra a sala na hora', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taco-'));
+  const lobby = new Lobby(new Store(dir));
+  const ana = fakeClient(lobby, 'Ana');
+  lobby.handle(ana, { t: 'create' });
+  const room = ana.room;
+  clearInterval(room.timer);
+  room.rules.startMethod = 'aleatorio';
+  lobby.handle(ana, { t: 'start' });
+  lobby.handle(ana, { t: 'surrender' });
+  assert.ok(!lobby.rooms.has(room.code), 'sala removida');
+  assert.equal(ana.room, null);
+  assert.ok(ana.inbox.some((m) => m.t === 'closed'));
+});
+
+test('carteira volta do backup assinado do navegador se o servidor perder os dados', () => {
+  process.env.TACO_SECRET = 'segredo-de-teste';
+  const dir1 = fs.mkdtempSync(path.join(os.tmpdir(), 'taco-'));
+  const lobby1 = new Lobby(new Store(dir1));
+  const ana = fakeClient(lobby1, 'Ana');
+  lobby1.handle(ana, { t: 'buy', item: 'power:danca' });
+  const backup = ana.inbox.filter((m) => m.t === 'me').at(-1).backup;
+  // "Deploy" with an empty data folder: same secret, no players.
+  const lobby2 = new Lobby(new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'taco-'))));
+  lobby2.connect({ readyState: 1, send() {}, on() {} });
+  const again = [...lobby2.clients.values()].at(-1);
+  lobby2.handle(again, { t: 'profile', name: 'Ana', key: ana.key, backup });
+  const acc = lobby2.store.player(ana.key);
+  assert.deepEqual(acc.owned, ['power:danca']);
+  assert.equal(acc.coins, 0);
+  // A forged backup is ignored.
+  const lobby3 = new Lobby(new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'taco-'))));
+  lobby3.connect({ readyState: 1, send() {}, on() {} });
+  const fake = [...lobby3.clients.values()].at(-1);
+  lobby3.handle(fake, { t: 'profile', name: 'Ana', key: ana.key, backup: { data: { ...backup.data, coins: 99999 }, sig: backup.sig } });
+  assert.equal(lobby3.store.player(ana.key).coins, 100);
+  delete process.env.TACO_SECRET;
 });

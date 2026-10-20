@@ -130,7 +130,27 @@ export class Room {
     // give them their seat in the match back instead of making them a spectator.
     if (this.players && client.pub) {
       const m = [...this.members.values()].find((x) => x.pub === client.pub && this.players.has(x.id));
-      if (m && (!m.client || m.client.ws.readyState !== 1)) return this.reclaim(client, m);
+      if (m) {
+        // Behind a reverse proxy the old socket may still look open for a while after F5:
+        // the newest connection of the same player wins and the old one is dropped.
+        if (m.client && m.client !== client && m.client.ws.readyState === 1) {
+          const old = m.client;
+          old.room = null;
+          old.send({ t: 'replaced' });
+          try {
+            old.ws.close(4000, 'replaced');
+          } catch {
+            /* ignore */
+          }
+        }
+        return this.reclaim(client, m);
+      }
+      // Never let a person watch a match played only by bots: take over a bot's seat.
+      const bot = this.botSeatFor();
+      if (bot) {
+        bot.pub = client.pub;
+        return this.reclaim(client, bot);
+      }
     }
     if (this.humans().length >= 12) return client.send({ t: 'err', msg: 'Sala cheia' });
     this.members.set(client.id, {
@@ -150,6 +170,18 @@ export class Room {
     }
     this.broadcastRoom();
     this.chatSystem(`${client.name} entrou na sala`);
+  }
+
+  // A seat currently played by a bot, preferring the team with fewer humans.
+  botSeatFor() {
+    if (!this.players || this.champ) return null;
+    const humansIn = (t) => this.seats[t].filter((id) => !this.members.get(id)?.bot).length;
+    for (const t of [0, 1].sort((a, b) => humansIn(a) - humansIn(b)))
+      for (const id of this.seats[t]) {
+        const m = this.members.get(id);
+        if (m?.bot && !m.client) return m;
+      }
+    return null;
   }
 
   reclaim(client, m) {
@@ -684,6 +716,8 @@ export class Room {
   tick() {
     this.frame++;
     if (this.phase === 'lobby') return;
+    // A match with nobody connected is frozen until a person comes back (no bots-only games).
+    if (!this.humans().length) return;
     this.time += DT;
     if (this.surrender && this.time > this.surrender.until) {
       this.ev({ k: 'msg', text: 'O pedido de rendição expirou. O jogo continua!' });
@@ -1272,6 +1306,19 @@ export class Room {
     this.surrenderedTeam = team;
     if (this.phase === 'paused') this.pause = null;
     this.win(1 - team, `${text} Vitória do Time ${this.teamName(1 - team)}.`);
+    // Only one person against bots: nothing left to play for, close the room right away.
+    if (this.humans().length <= 1) this.dissolve('Você se rendeu e não havia outros jogadores: a sala foi encerrada.');
+  }
+
+  dissolve(msg) {
+    this.sendSnapshot(); // flush the final events (coins, result) before closing
+    for (const m of this.humans()) {
+      m.client.send({ t: 'closed', msg });
+      m.client.room = null;
+      m.client = null;
+    }
+    clearTimeout(this.emptyTimer);
+    this.lobby.removeRoom(this);
   }
 
   // Registered teams (duplas) with at least one member connected to this room.

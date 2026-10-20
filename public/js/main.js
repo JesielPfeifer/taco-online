@@ -81,6 +81,7 @@ function saveProfile() {
 
 // ------------------------------------------------------------------ network
 let ws;
+let replacedHere = false;
 let reconnectDelay = 500;
 function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
@@ -93,6 +94,7 @@ function connect() {
   };
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onclose = () => {
+    if (replacedHere) return; // another tab took over this player: do not fight back
     toast('Conexão perdida. Reconectando...');
     voice.leave();
     state.room = null;
@@ -105,7 +107,13 @@ function send(msg) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 function sendProfile() {
-  send({ t: 'profile', name: state.profile.name || 'Jogador', avatar: state.profile.avatar, key: state.profile.key });
+  let backup = null;
+  try {
+    backup = JSON.parse(localStorage.getItem('taco-wallet-backup') || 'null');
+  } catch {
+    /* ignore */
+  }
+  send({ t: 'profile', name: state.profile.name || 'Jogador', avatar: state.profile.avatar, key: state.profile.key, backup });
 }
 
 function onMessage(m) {
@@ -121,7 +129,32 @@ function onMessage(m) {
       break;
     case 'me':
       state.me = m.me;
+      // Signed copy of the wallet kept in the browser: if the server ever loses its data
+      // (deploy without a persistent volume), it restores coins and purchases from it.
+      if (m.backup)
+        try {
+          localStorage.setItem('taco-wallet-backup', JSON.stringify(m.backup));
+        } catch {
+          /* ignore */
+        }
       renderWallet();
+      break;
+    case 'restored':
+      toast('Suas moedas e compras foram restauradas do backup deste navegador ✅');
+      break;
+    case 'replaced':
+      // Same player opened the game somewhere else (new tab or reload behind a proxy).
+      replacedHere = true;
+      toast('Você abriu o jogo em outra aba/janela. Esta foi desconectada.');
+      break;
+    case 'closed':
+      voice.leave();
+      state.room = null;
+      document.exitPointerLock?.();
+      showScreen('menu');
+      history.replaceState(null, '', '/');
+      toast(m.msg);
+      send({ t: 'list' });
       break;
     case 'bought':
       sfx.point();

@@ -83,6 +83,7 @@ export class Lobby {
     client.send({
       t: 'me',
       me: { pub: a.pub, coins: a.coins, owned: a.owned, powersOff: a.powersOff, stats: a.stats, teams },
+      backup: this.store.backupOf(a),
     });
   }
 
@@ -118,6 +119,10 @@ export class Lobby {
         if (typeof msg.key === 'string' && KEY_RE.test(msg.key) && !client.key) {
           client.key = msg.key;
           client.pub = Store.pub(msg.key);
+          if (this.store.restore(msg.key, client.name, msg.backup)) {
+            console.log(`carteira restaurada do backup do navegador (${client.pub})`);
+            client.send({ t: 'restored' });
+          }
         }
         client.avatar = sanitizeAvatar(msg.avatar, client.key ? this.owned(client) : []);
         this.sendMe(client);

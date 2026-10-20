@@ -6,8 +6,13 @@ services:
     ports:
       - "${TACO_PORT:-3000}:3000"
     volumes:
-      - taco-data:/data # moedas, compras, times e campeonatos
+      # Moedas, compras, times e campeonatos. NÃO remova este volume num deploy.
+      - taco-data:/data
     environment:
+      # Assina o backup da carteira guardado em cada navegador. Com ele definido, mesmo que
+      # o volume se perca as moedas e compras voltam quando o jogador abre o jogo.
+      # Gere uma vez com:  openssl rand -hex 32   e coloque em um arquivo .env ao lado deste.
+      - TACO_SECRET=${TACO_SECRET:-}
       # Voz: STUN basta na rede local. Para amigos atrás de NAT restrito, configure um TURN (ex.: coturn).
       - STUN_URLS=stun:stun.l.google.com:19302
       # - TURN_URL=turn:seu-dominio:3478
@@ -17,3 +22,6 @@ services:
 
 volumes:
   taco-data:
+    # Nome fixo: sem isso o Compose usa "<pasta-ou-stack>_taco-data" e, se o nome do
+    # projeto mudar entre deploys (Portainer, CI, outra pasta), nasce um volume vazio.
+    name: taco-online-data

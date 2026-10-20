@@ -21,8 +21,11 @@ Servidor Node.js autoritativo com WebSocket, cliente Three.js, tudo num containe
 Imagem publicada pelo CI (amd64 e arm64):
 
 ```bash
-docker run -d --name taco -p 3000:3000 --restart unless-stopped ghcr.io/jesielpfeifer/taco-online:latest
+docker run -d --name taco -p 3000:3000 --restart unless-stopped \
+  -v taco-online-data:/data -e TACO_SECRET=$(openssl rand -hex 32) \
+  ghcr.io/jesielpfeifer/taco-online:latest
 ```
+(guarde o valor do `TACO_SECRET` e use sempre o mesmo nos próximos deploys)
 
 Ou com compose (faz o build local se preferir):
 
@@ -35,9 +38,17 @@ Abra `http://IP-DO-SERVIDOR:3000`, crie uma sala e mande o link (`/?sala=CODIGO`
 três etapas, como a escolha de mapa do Counter-Strike: **mapa** (cartões com prévia), **modo** (partida única ou
 campeonato) e **regras e jogadores**. Recarregar a página (F5) no meio da partida devolve o jogador ao mesmo lugar.
 
-**Dados**: moedas, compras, times e campeonatos ficam em `/data/taco.json` (volume `taco-data` no compose).
-No `docker run`, adicione `-v taco-data:/data`. Cada navegador guarda uma chave secreta do jogador; limpar os
-dados do site perde a carteira daquele navegador.
+**Dados (moedas e compras não podem zerar no deploy)**: tudo fica em `/data/taco.json`. O que garante a persistência:
+
+1. **Volume em `/data`** com nome fixo: o compose usa `taco-online-data` (não depende do nome da pasta/stack). Em
+   Portainer, Coolify, Dokploy etc., mapeie um volume ou pasta persistente para `/data`. Nunca rode `docker compose down -v`.
+2. **`TACO_SECRET`** (crie um `.env` com `TACO_SECRET=<saída de openssl rand -hex 32>` e mantenha o mesmo valor): cada
+   navegador guarda um backup *assinado* da carteira; se o servidor subir sem os dados, o jogador recupera moedas e compras
+   ao abrir o jogo. Backups adulterados são recusados.
+3. Confira o log ao iniciar: `Dados: /data/taco.json carregado (N jogadores…)`. Se aparecer "começando do zero" depois de um
+   deploy, o volume não está montado.
+
+Cada navegador guarda a chave secreta do jogador; limpar os dados do site perde a carteira daquele navegador.
 
 **Chat de voz**: o navegador só libera o microfone em **HTTPS** (ou `localhost`), então coloque o jogo atrás de um
 proxy com certificado. Na rede local basta o STUN padrão; para amigos de fora atrás de NAT restrito, configure um

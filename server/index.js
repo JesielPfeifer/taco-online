@@ -35,6 +35,8 @@ wss.on('connection', (ws) => lobby.connect(ws));
 
 server.listen(PORT, () => {
   console.log(`Taco online rodando em http://localhost:${PORT}`);
+  console.log(lobby.store.describe());
+  if (!process.env.TACO_SECRET) console.log('Dica: defina TACO_SECRET para que os backups de carteira dos navegadores sobrevivam até à perda do volume.');
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
